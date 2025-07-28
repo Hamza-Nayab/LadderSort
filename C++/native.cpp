@@ -17,7 +17,7 @@ int main() {
         cout << "Run #" << run << ":\n";
 
         // Generate random input
-        vector<int> original(100'000'000);
+        vector<int> original(1'000'000);
         for (int i = 0; i < original.size(); ++i)
             original[i] = dist(rng);
 

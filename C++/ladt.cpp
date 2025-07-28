@@ -60,45 +60,47 @@ vector<int> ladder(const vector<int>& array) {
 }
 
 // Run benchmark on given input vector
-void benchmark_case(const string& case_name, vector<int> input) {
-    mt19937 rng(5);  // Reset for reproducibility
-    double total_initial = 0.0, total_post_insert = 0.0;
+void benchmark_case(const string& case_name, const vector<int>& input) {
+    double total = 0.0;
 
     cout << "\n==== Benchmark: " << case_name << " ====\n";
 
-    for (int run = 1; run <= 1; ++run) {
-        cout << "Run #" << run << ":\n";
-
+    for (int run = 1; run <= 10; ++run) {
         vector<int> data = input;
-
         auto start = chrono::high_resolution_clock::now();
         vector<int> sorted = ladder(data);
         auto end = chrono::high_resolution_clock::now();
+
         chrono::duration<double> duration = end - start;
-        total_initial += duration.count();
-        cout << "  Initial sort: " << duration.count() << " seconds\n";
+        double elapsed = duration.count();
+        total += elapsed;
+        cout << "Run #" << run << ": " << elapsed << " seconds\n";
 
         if (run == 1) {
-            vector<int> expected = data;
+            vector<int> expected = input;
             sort(expected.begin(), expected.end());
             cout << "  Correct: " << boolalpha << (sorted == expected) << "\n";
         }
-
-        sorted.push_back(500);
-        start = chrono::high_resolution_clock::now();
-        vector<int> re_sorted = ladder(sorted);
-        end = chrono::high_resolution_clock::now();
-        duration = end - start;
-        total_post_insert += duration.count();
-        cout << "  Post-insert sort: " << duration.count() << " seconds\n";
     }
 
-    cout << "Summary for " << case_name << ":\n";
-    cout << "  Avg Initial: " << total_initial / 1.0 << " s\n";
-    cout << "  Avg Post-insert: " << total_post_insert / 1.0 << " s\n";
+    cout << "Avg Time: " << (total / 10.0) << " seconds\n";
 }
 
-// Generate input cases
+// Separate benchmark for post-insert case
+void benchmark_insert_case(const vector<int>& input) {
+    cout << "\n==== Post-insert Benchmark ====\n";
+
+    vector<int> data = ladder(input);
+    data.push_back(500); // Insert 1 new value
+
+    auto start = chrono::high_resolution_clock::now();
+    vector<int> sorted = ladder(data);
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> duration = end - start;
+
+    cout << "Post-insert sort time: " << duration.count() << " seconds\n";
+}
+
 int main() {
     const int N = 10'000'000;
     mt19937 rng(5);
@@ -109,7 +111,7 @@ int main() {
     for (int& x : random_input) x = dist(rng);
     benchmark_case("Random Input", random_input);
 
-    // Case 2: Already Sorted
+    // Case 2: Sorted
     vector<int> sorted_input = random_input;
     sort(sorted_input.begin(), sorted_input.end());
     benchmark_case("Sorted Input", sorted_input);
@@ -119,20 +121,20 @@ int main() {
     reverse(reverse_input.begin(), reverse_input.end());
     benchmark_case("Reverse Sorted", reverse_input);
 
-    // Case 4: Nearly Sorted (95% sorted)
+    // Case 4: Nearly Sorted (95%)
     vector<int> nearly_sorted = sorted_input;
-    for (int i = 0; i < N / 20; ++i) {
-        int a = rng() % N;
-        int b = rng() % N;
-        swap(nearly_sorted[a], nearly_sorted[b]);
-    }
+    for (int i = 0; i < N / 20; ++i)
+        swap(nearly_sorted[rng() % N], nearly_sorted[rng() % N]);
     benchmark_case("Nearly Sorted", nearly_sorted);
 
-    // Case 5: Few Unique Elements
+    // Case 5: Few Unique
     uniform_int_distribution<int> few_dist(1, 10);
     vector<int> few_unique(N);
     for (int& x : few_unique) x = few_dist(rng);
     benchmark_case("Few Unique Elements", few_unique);
+
+    // Insert-1-at-end benchmark
+    benchmark_insert_case(sorted_input);
 
     return 0;
 }
