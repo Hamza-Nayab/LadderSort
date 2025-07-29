@@ -153,8 +153,6 @@ int main() {
         few_unique_end[i] = dist(rng);  // make tail noisy
     benchmark_case("Few Unique + Random Tail", few_unique_end);
 
-    // Insert-at-end
     benchmark_insert_case(sorted_input);
-
     return 0;
 }
