@@ -7,7 +7,12 @@
 
 using namespace std;
 
-// Binary search for ladder index
+// === Config Flags ===
+const bool PRINT_EACH_RUN = false;
+const int NUM_ELEMENTS = 10'000'000;
+const int NUM_RUNS = 10;
+
+// === Binary search for ladder index ===
 int binary_search_lad(const vector<vector<int>>& lad, int target) {
     int low = 0, high = lad.size();
     while (low < high) {
@@ -20,17 +25,15 @@ int binary_search_lad(const vector<vector<int>>& lad, int target) {
     return low;
 }
 
-// MinHeap item structure
+// === MinHeap item ===
 struct HeapItem {
-    int value;
-    int list_idx;
-    int elem_idx;
+    int value, list_idx, elem_idx;
     bool operator>(const HeapItem& other) const {
         return value > other.value;
     }
 };
 
-// Merge ladders using custom MinHeap
+// === Merge ladders ===
 vector<int> merge_ladders(vector<vector<int>>& lists) {
     vector<int> merged;
     priority_queue<HeapItem, vector<HeapItem>, greater<HeapItem>> heap;
@@ -46,7 +49,7 @@ vector<int> merge_ladders(vector<vector<int>>& lists) {
     return merged;
 }
 
-// Ladder sort
+// === Ladder Sort ===
 vector<int> ladder(const vector<int>& array) {
     if (array.empty()) return {};
     vector<vector<int>> lad = { {array[0]} };
@@ -59,22 +62,21 @@ vector<int> ladder(const vector<int>& array) {
     return merge_ladders(lad);
 }
 
-// Run benchmark on given input vector
+// === Benchmark for normal case ===
 void benchmark_case(const string& case_name, const vector<int>& input) {
     double total = 0.0;
-
     cout << "\n==== Benchmark: " << case_name << " ====\n";
 
-    for (int run = 1; run <= 10; ++run) {
+    for (int run = 1; run <= NUM_RUNS; ++run) {
         vector<int> data = input;
         auto start = chrono::high_resolution_clock::now();
         vector<int> sorted = ladder(data);
         auto end = chrono::high_resolution_clock::now();
-
         chrono::duration<double> duration = end - start;
         double elapsed = duration.count();
         total += elapsed;
-        cout << "Run #" << run << ": " << elapsed << " seconds\n";
+
+        if (PRINT_EACH_RUN) cout << "Run #" << run << ": " << elapsed << " seconds\n";
 
         if (run == 1) {
             vector<int> expected = input;
@@ -82,36 +84,46 @@ void benchmark_case(const string& case_name, const vector<int>& input) {
             cout << "  Correct: " << boolalpha << (sorted == expected) << "\n";
         }
     }
-
-    cout << "Avg Time: " << (total / 10.0) << " seconds\n";
+    cout << "Avg Time: " << (total / NUM_RUNS) << " seconds\n";
 }
 
-// Separate benchmark for post-insert case
+// === Benchmark for repeated insertions ===
 void benchmark_insert_case(const vector<int>& input) {
-    cout << "\n==== Post-insert Benchmark ====\n";
+    cout << "\n==== Post-insert Benchmark (10 runs) ====\n";
+    double total = 0.0;
 
-    vector<int> data = ladder(input);
-    data.push_back(500); // Insert 1 new value
+    for (int run = 1; run <= NUM_RUNS; ++run) {
+        vector<int> data = ladder(input);
+        data.push_back(500);  // Insert 1 new value
+        auto start = chrono::high_resolution_clock::now();
+        vector<int> sorted = ladder(data);
+        auto end = chrono::high_resolution_clock::now();
+        chrono::duration<double> duration = end - start;
+        double elapsed = duration.count();
+        total += elapsed;
 
-    auto start = chrono::high_resolution_clock::now();
-    vector<int> sorted = ladder(data);
-    auto end = chrono::high_resolution_clock::now();
-    chrono::duration<double> duration = end - start;
+        if (PRINT_EACH_RUN) cout << "Run #" << run << ": " << elapsed << " seconds\n";
 
-    cout << "Post-insert sort time: " << duration.count() << " seconds\n";
+        if (run == 1) {
+            vector<int> expected = data;
+            sort(expected.begin(), expected.end());
+            cout << "  Correct: " << boolalpha << (sorted == expected) << "\n";
+        }
+    }
+
+    cout << "Avg Insert-1-at-end Time: " << (total / NUM_RUNS) << " seconds\n";
 }
 
 int main() {
-    const int N = 10'000'000;
     mt19937 rng(5);
     uniform_int_distribution<int> dist(1, 10'000'000);
 
-    // Case 1: Random
-    vector<int> random_input(N);
+    // Case 1: Random Input
+    vector<int> random_input(NUM_ELEMENTS);
     for (int& x : random_input) x = dist(rng);
     benchmark_case("Random Input", random_input);
 
-    // Case 2: Sorted
+    // Case 2: Sorted Input
     vector<int> sorted_input = random_input;
     sort(sorted_input.begin(), sorted_input.end());
     benchmark_case("Sorted Input", sorted_input);
@@ -123,17 +135,25 @@ int main() {
 
     // Case 4: Nearly Sorted (95%)
     vector<int> nearly_sorted = sorted_input;
-    for (int i = 0; i < N / 20; ++i)
-        swap(nearly_sorted[rng() % N], nearly_sorted[rng() % N]);
-    benchmark_case("Nearly Sorted", nearly_sorted);
+    for (int i = 0; i < NUM_ELEMENTS / 20; ++i)
+        swap(nearly_sorted[rng() % NUM_ELEMENTS], nearly_sorted[rng() % NUM_ELEMENTS]);
+    benchmark_case("Nearly Sorted (95%)", nearly_sorted);
 
-    // Case 5: Few Unique
+    // Case 5: Few Unique Elements
     uniform_int_distribution<int> few_dist(1, 10);
-    vector<int> few_unique(N);
+    vector<int> few_unique(NUM_ELEMENTS);
     for (int& x : few_unique) x = few_dist(rng);
     benchmark_case("Few Unique Elements", few_unique);
 
-    // Insert-1-at-end benchmark
+    // Case 6: Few Unique At End
+    vector<int> few_unique_end(NUM_ELEMENTS);
+    for (int i = 0; i < NUM_ELEMENTS - 1000; ++i)
+        few_unique_end[i] = few_dist(rng);
+    for (int i = NUM_ELEMENTS - 1000; i < NUM_ELEMENTS; ++i)
+        few_unique_end[i] = dist(rng);  // make tail noisy
+    benchmark_case("Few Unique + Random Tail", few_unique_end);
+
+    // Insert-at-end
     benchmark_insert_case(sorted_input);
 
     return 0;
