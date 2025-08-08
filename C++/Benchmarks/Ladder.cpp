@@ -12,7 +12,7 @@ const bool PRINT_EACH_RUN = false;
 const int NUM_ELEMENTS = 10'000'000;
 const int NUM_RUNS = 10;
 
-// === Binary search for ladder index ===
+
 int binary_search_lad(const vector<vector<int>>& lad, int target) {
     int low = 0, high = lad.size();
     while (low < high) {
