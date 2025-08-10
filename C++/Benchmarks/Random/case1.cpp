@@ -3,7 +3,7 @@
 #include <queue>
 #include <algorithm>
 #include <chrono>
-#include <numeric>
+#include <random>
 
 using namespace std;
 
@@ -31,7 +31,7 @@ struct HeapItem {
 // Merging ladders
 vector<int> merge_ladders(const vector<vector<int>>& lists) {
     vector<int> merged;
-    merged.reserve(10'000'001);
+    merged.reserve(10'000'000);
 
     priority_queue<HeapItem, vector<HeapItem>, greater<HeapItem>> heap;
     for (int i = 0; i < (int)lists.size(); ++i) {
@@ -75,26 +75,26 @@ vector<int> ladder(const vector<int>& array) {
 
 int main() {
     constexpr int n = 10'000'000;
-    double total_post_insert = 0.0;
+    double total_time = 0.0;
 
-    // Prepare sorted array once
-    vector<int> sorted_arr(n);
-    iota(sorted_arr.begin(), sorted_arr.end(), 0);
+    // Random generator
+    mt19937 rng(123);
+    uniform_int_distribution<int> dist(1, 10'000'000);
 
     for (int run = 1; run <= 10; ++run) {
-        vector<int> test_arr = sorted_arr;
-        test_arr.push_back(-1); // element that forces reordering
+        vector<int> arr(n);
+        for (int& x : arr) x = dist(rng);
 
         auto start = chrono::steady_clock::now();
-        vector<int> result = ladder(test_arr);
+        vector<int> result = ladder(arr);
         auto end = chrono::steady_clock::now();
 
         double duration = chrono::duration<double>(end - start).count();
-        total_post_insert += duration;
+        total_time += duration;
     }
 
-    cout << "Average time (Post-insert): " 
-         << fixed << total_post_insert / 10.0 << " seconds\n";
+    cout << "Average time (Random distribution): " 
+         << fixed << total_time / 10.0 << " seconds\n";
 
     return 0;
 }

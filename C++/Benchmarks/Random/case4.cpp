@@ -4,10 +4,10 @@
 #include <algorithm>
 #include <chrono>
 #include <numeric>
+#include <random>
 
 using namespace std;
 
-// Ladder index binary search
 inline int binary_search_lad(const vector<vector<int>>& lad, int target) {
     int low = 0, high = lad.size();
     while (low < high) {
@@ -20,7 +20,6 @@ inline int binary_search_lad(const vector<vector<int>>& lad, int target) {
     return low;
 }
 
-// Heap structure
 struct HeapItem {
     int value, list_idx, elem_idx;
     bool operator>(const HeapItem& other) const {
@@ -28,7 +27,6 @@ struct HeapItem {
     }
 };
 
-// Merging ladders
 vector<int> merge_ladders(const vector<vector<int>>& lists) {
     vector<int> merged;
     merged.reserve(10'000'001);
@@ -52,7 +50,6 @@ vector<int> merge_ladders(const vector<vector<int>>& lists) {
     return merged;
 }
 
-// Ladder Sort
 vector<int> ladder(const vector<int>& array) {
     if (array.empty()) return {};
 
@@ -74,27 +71,33 @@ vector<int> ladder(const vector<int>& array) {
 }
 
 int main() {
-    constexpr int n = 10'000'000;
-    double total_post_insert = 0.0;
+    constexpr int NUM_ELEMENTS = 10'000'000;
+    mt19937 rng(42); // fixed seed
+    double total_time = 0.0;
 
-    // Prepare sorted array once
-    vector<int> sorted_arr(n);
-    iota(sorted_arr.begin(), sorted_arr.end(), 0);
+    // Generate "Few Unique + Stable Groups" dataset
+    vector<int> arr;
+    arr.reserve(NUM_ELEMENTS);
+    for (int v = 1; v <= 10; ++v) {
+        for (int count = 0; count < NUM_ELEMENTS / 10; ++count)
+            arr.push_back(v);
+    }
+    for (int v = 0; v < 10; ++v) {
+        shuffle(arr.begin() + v * (NUM_ELEMENTS / 10),
+                arr.begin() + (v + 1) * (NUM_ELEMENTS / 10), rng);
+    }
 
     for (int run = 1; run <= 10; ++run) {
-        vector<int> test_arr = sorted_arr;
-        test_arr.push_back(-1); // element that forces reordering
+        vector<int> test_arr = arr;
+        test_arr.push_back(-1); // force reordering
 
         auto start = chrono::steady_clock::now();
         vector<int> result = ladder(test_arr);
         auto end = chrono::steady_clock::now();
 
-        double duration = chrono::duration<double>(end - start).count();
-        total_post_insert += duration;
+        total_time += chrono::duration<double>(end - start).count();
     }
 
-    cout << "Average time (Post-insert): " 
-         << fixed << total_post_insert / 10.0 << " seconds\n";
-
-    return 0;
+    cout << "Average time (Few Unique + Stable Groups + Post-insert): "
+         << fixed << total_time / 10.0 << " seconds\n";
 }
