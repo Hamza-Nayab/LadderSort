@@ -116,7 +116,7 @@ void benchmark_insert_case(const vector<int>& input) {
 
 // === Main function ===
 int main() {
-    mt19937 rng(5);
+    mt19937 rng(45);
 
     auto generate_tests = [&](bool unique_only) {
         vector<vector<int>> datasets;
@@ -125,18 +125,53 @@ int main() {
         // === Base generator ===
         vector<int> base(NUM_ELEMENTS);
         if (unique_only) {
-            iota(base.begin(), base.end(), -NUM_ELEMENTS/2); // unique range
+            iota(base.begin(), base.end(), -NUM_ELEMENTS/2); // unique integers
             shuffle(base.begin(), base.end(), rng);
         } else {
             uniform_int_distribution<int> dist(-5'000'000, 5'000'000);
             for (int &x : base) x = dist(rng);
         }
 
-        // 1. Random Input
-        datasets.push_back(base);
-        names.push_back("Random Input");
+        // === Case 1: Block Sorted (20 blocks) ===
+        {
+            vector<int> arr(NUM_ELEMENTS);
+            int block_size = NUM_ELEMENTS / 20;
+            int val = -NUM_ELEMENTS / 2;
+            for (int b = 0; b < 20; ++b) {
+                for (int i = 0; i < block_size; ++i)
+                    arr[b * block_size + i] = val++;
+                // Shuffle each block internally
+                shuffle(arr.begin() + b * block_size,
+                        arr.begin() + (b + 1) * block_size, rng);
+            }
+            datasets.push_back(arr);
+            names.push_back("Block Sorted (20 blocks)");
+        }
 
-        // 2. Sorted Input
+        // === Case 2: Few Unique + Stable Groups ===
+        {
+            vector<int> arr;
+            arr.reserve(NUM_ELEMENTS);
+            for (int v = 1; v <= 10; ++v) {
+                for (int count = 0; count < NUM_ELEMENTS / 10; ++count)
+                    arr.push_back(v);
+            }
+            // Shuffle only within each group
+            for (int v = 0; v < 10; ++v) {
+                shuffle(arr.begin() + v * (NUM_ELEMENTS / 10),
+                        arr.begin() + (v + 1) * (NUM_ELEMENTS / 10), rng);
+            }
+            datasets.push_back(arr);
+            names.push_back("Few Unique + Stable Groups");
+        }
+
+        // === Case 3: Random Input ===
+        {
+            datasets.push_back(base);
+            names.push_back("Random Input");
+        }
+
+        // === Case 4: Sorted Input ===
         {
             vector<int> arr = base;
             sort(arr.begin(), arr.end());
@@ -144,7 +179,7 @@ int main() {
             names.push_back("Sorted Input");
         }
 
-        // 3. Reverse Sorted
+        // === Case 5: Reverse Sorted ===
         {
             vector<int> arr = datasets.back();
             reverse(arr.begin(), arr.end());
@@ -152,17 +187,17 @@ int main() {
             names.push_back("Reverse Sorted");
         }
 
-        // 4. Nearly Sorted (95%)
+        // === Case 6: Nearly Sorted (95%) ===
         {
             vector<int> arr = datasets[names.size() - 2]; // sorted version
-            int swap_count = NUM_ELEMENTS / 20;
+            int swap_count = NUM_ELEMENTS / 20; // 5%
             for (int i = 0; i < swap_count; ++i)
                 swap(arr[rng() % NUM_ELEMENTS], arr[rng() % NUM_ELEMENTS]);
             datasets.push_back(arr);
             names.push_back("Nearly Sorted (95%)");
         }
 
-        // 5. Few Unique Elements (10 distinct values at end of sorted array)
+        // === Case 7: Few Unique Elements at End ===
         {
             vector<int> arr = datasets[names.size() - 3]; // sorted version
             uniform_int_distribution<int> few_dist(1, 10);
@@ -172,7 +207,7 @@ int main() {
             names.push_back("Few Unique Elements at End");
         }
 
-        // 6. Post-Insertion Sorted
+        // === Case 8: Post-Insertion Sorted ===
         {
             vector<int> arr = datasets[names.size() - 4]; // sorted version
             arr.push_back(unique_only ? NUM_ELEMENTS + 1 : 500);
@@ -180,7 +215,7 @@ int main() {
             names.push_back("Post-Insertion Sorted");
         }
 
-        // Run all benchmarks
+        // === Run all benchmarks ===
         for (size_t i = 0; i < datasets.size(); ++i)
             benchmark_case((unique_only ? "[Unique] " : "[General] ") + names[i], datasets[i]);
     };
@@ -188,5 +223,6 @@ int main() {
     // === Run for both general and unique datasets ===
     generate_tests(false); // general dataset (duplicates possible)
     generate_tests(true);  // unique dataset
+
     return 0;
 }
