@@ -209,13 +209,14 @@ int main() {
         names.push_back("Few Unique Elements at End");
     }
 
-    // === Case 8: Post-Insertion Sorted ===
-    {
-        auto arr = datasets[names.size() - 4]; // sorted version
-        arr.push_back(500);
-        datasets.push_back(arr);
-        names.push_back("Post-Insertion Sorted");
-    }
+  // === Case 8: Post-Insertion Sorted ===
+{
+    auto arr = datasets[names.size() - 4]; // sorted version
+    arr.push_back(500); // append new element
+    datasets.push_back(arr);
+    names.push_back("Post-Insertion Sorted");
+}
+
 
     // Run all benchmarks
     for (size_t i = 0; i < datasets.size(); ++i)
