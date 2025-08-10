@@ -114,45 +114,79 @@ void benchmark_insert_case(const vector<int>& input) {
     cout << "Avg Insert-1-at-end Time: " << (total / NUM_RUNS) << " seconds\n";
 }
 
+// === Main function ===
 int main() {
     mt19937 rng(5);
-    uniform_int_distribution<int> dist(1, 10'000'000);
 
-    // Case 1: Random Input
-    vector<int> random_input(NUM_ELEMENTS);
-    for (int& x : random_input) x = dist(rng);
-    benchmark_case("Random Input", random_input);
+    auto generate_tests = [&](bool unique_only) {
+        vector<vector<int>> datasets;
+        vector<string> names;
 
-    // Case 2: Sorted Input
-    vector<int> sorted_input = random_input;
-    sort(sorted_input.begin(), sorted_input.end());
-    benchmark_case("Sorted Input", sorted_input);
+        // === Base generator ===
+        vector<int> base(NUM_ELEMENTS);
+        if (unique_only) {
+            iota(base.begin(), base.end(), -NUM_ELEMENTS/2); // unique range
+            shuffle(base.begin(), base.end(), rng);
+        } else {
+            uniform_int_distribution<int> dist(-5'000'000, 5'000'000);
+            for (int &x : base) x = dist(rng);
+        }
 
-    // Case 3: Reverse Sorted
-    vector<int> reverse_input = sorted_input;
-    reverse(reverse_input.begin(), reverse_input.end());
-    benchmark_case("Reverse Sorted", reverse_input);
+        // 1. Random Input
+        datasets.push_back(base);
+        names.push_back("Random Input");
 
-    // Case 4: Nearly Sorted (95%)
-    vector<int> nearly_sorted = sorted_input;
-    for (int i = 0; i < NUM_ELEMENTS / 20; ++i)
-        swap(nearly_sorted[rng() % NUM_ELEMENTS], nearly_sorted[rng() % NUM_ELEMENTS]);
-    benchmark_case("Nearly Sorted (95%)", nearly_sorted);
+        // 2. Sorted Input
+        {
+            vector<int> arr = base;
+            sort(arr.begin(), arr.end());
+            datasets.push_back(arr);
+            names.push_back("Sorted Input");
+        }
 
-    // Case 5: Few Unique Elements
-    uniform_int_distribution<int> few_dist(1, 10);
-    vector<int> few_unique(NUM_ELEMENTS);
-    for (int& x : few_unique) x = few_dist(rng);
-    benchmark_case("Few Unique Elements", few_unique);
+        // 3. Reverse Sorted
+        {
+            vector<int> arr = datasets.back();
+            reverse(arr.begin(), arr.end());
+            datasets.push_back(arr);
+            names.push_back("Reverse Sorted");
+        }
 
-    // Case 6: Few Unique At End
-    vector<int> few_unique_end(NUM_ELEMENTS);
-    for (int i = 0; i < NUM_ELEMENTS - 1000; ++i)
-        few_unique_end[i] = few_dist(rng);
-    for (int i = NUM_ELEMENTS - 1000; i < NUM_ELEMENTS; ++i)
-        few_unique_end[i] = dist(rng);  // make tail noisy
-    benchmark_case("Few Unique + Random Tail", few_unique_end);
+        // 4. Nearly Sorted (95%)
+        {
+            vector<int> arr = datasets[names.size() - 2]; // sorted version
+            int swap_count = NUM_ELEMENTS / 20;
+            for (int i = 0; i < swap_count; ++i)
+                swap(arr[rng() % NUM_ELEMENTS], arr[rng() % NUM_ELEMENTS]);
+            datasets.push_back(arr);
+            names.push_back("Nearly Sorted (95%)");
+        }
 
-    benchmark_insert_case(sorted_input);
+        // 5. Few Unique Elements (10 distinct values at end of sorted array)
+        {
+            vector<int> arr = datasets[names.size() - 3]; // sorted version
+            uniform_int_distribution<int> few_dist(1, 10);
+            for (int i = NUM_ELEMENTS - 1000; i < NUM_ELEMENTS; ++i)
+                arr[i] = few_dist(rng);
+            datasets.push_back(arr);
+            names.push_back("Few Unique Elements at End");
+        }
+
+        // 6. Post-Insertion Sorted
+        {
+            vector<int> arr = datasets[names.size() - 4]; // sorted version
+            arr.push_back(unique_only ? NUM_ELEMENTS + 1 : 500);
+            datasets.push_back(arr);
+            names.push_back("Post-Insertion Sorted");
+        }
+
+        // Run all benchmarks
+        for (size_t i = 0; i < datasets.size(); ++i)
+            benchmark_case((unique_only ? "[Unique] " : "[General] ") + names[i], datasets[i]);
+    };
+
+    // === Run for both general and unique datasets ===
+    generate_tests(false); // general dataset (duplicates possible)
+    generate_tests(true);  // unique dataset
     return 0;
 }
