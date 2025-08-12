@@ -1,0 +1,8 @@
+Case0 = Sorted
+Case 1 = Random
+Case 2 = End Insertion
+Case 3 = Sorted Blocks
+Case 4 = Few Unique and stable groups
+Case 5 = Reverse
+Case 6 = 95% sorted 5% Random
+Case 7 = 10 unique elements at the end.

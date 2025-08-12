@@ -7,8 +7,19 @@
 
 using namespace std;
 
-constexpr int NUM_ELEMENTS = 10'000'000;
-constexpr int NUM_BLOCKS = 100;
+// Find the first index i where tops[i] <= target.
+// Note: 'tops' is maintained in non-increasing order for this rule.
+inline int find_ladder_index(const vector<int>& tops, int target) {
+    int low = 0, high = static_cast<int>(tops.size());
+    while (low < high) {
+        int mid = (low + high) / 2;
+        if (tops[mid] > target)  // need a ladder with tail <= target -> move right
+            low = mid + 1;
+        else
+            high = mid;
+    }
+    return low; // may be == tops.size() -> new ladder
+}
 
 // Heap structure
 struct HeapItem {
@@ -18,10 +29,10 @@ struct HeapItem {
     }
 };
 
-// Merge sorted blocks using min-heap
+// Merging ladders (k-way merge using a min-heap)
 vector<int> merge_ladders(const vector<vector<int>>& lists) {
     vector<int> merged;
-    merged.reserve(NUM_ELEMENTS);
+    merged.reserve(10'000'000);
 
     priority_queue<HeapItem, vector<HeapItem>, greater<HeapItem>> heap;
     for (int i = 0; i < (int)lists.size(); ++i) {
@@ -32,6 +43,7 @@ vector<int> merge_ladders(const vector<vector<int>>& lists) {
     while (!heap.empty()) {
         auto top = heap.top(); heap.pop();
         merged.push_back(top.value);
+
         const auto& curr = lists[top.list_idx];
         int next_idx = top.elem_idx + 1;
         if (next_idx < (int)curr.size())
@@ -41,28 +53,31 @@ vector<int> merge_ladders(const vector<vector<int>>& lists) {
     return merged;
 }
 
-// Ladder Sort
+// Ladder Sort (build piles using 'tops' for fast binary search, then merge)
 vector<int> ladder(const vector<int>& array) {
     if (array.empty()) return {};
 
     vector<vector<int>> lad;
+    vector<int> tops;          // tails of each ladder (last elements)
     lad.reserve(64);
+    tops.reserve(64);
+
+    // seed with first element
     lad.push_back({array[0]});
+    tops.push_back(array[0]);
 
     for (int i = 1, n = (int)array.size(); i < n; ++i) {
         int a = array[i];
-        int low = 0, high = (int)lad.size();
-        while (low < high) {
-            int mid = (low + high) / 2;
-            if (lad[mid].back() > a)
-                low = mid + 1;
-            else
-                high = mid;
-        }
-        if (low == (int)lad.size())
+        int idx = find_ladder_index(tops, a);
+        if (idx == (int)lad.size()) {
+            // start a new ladder
             lad.emplace_back().emplace_back(a);
-        else
-            lad[low].emplace_back(a);
+            tops.emplace_back(a);
+        } else {
+            // append to existing ladder and update its tail
+            lad[idx].emplace_back(a);
+            tops[idx] = a;
+        }
     }
 
     return merge_ladders(lad);

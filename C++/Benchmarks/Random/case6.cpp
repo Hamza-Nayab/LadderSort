@@ -84,33 +84,35 @@ vector<int> ladder(const vector<int>& array) {
 }
 
 int main() {
-    constexpr int NUM_ELEMENTS = 10'000'000;
-    mt19937 rng(42); // fixed seed
+    constexpr int n = 10'000'000;
     double total_time = 0.0;
 
-    // Generate "Few Unique + Stable Groups" dataset
-    vector<int> arr;
-    arr.reserve(NUM_ELEMENTS);
-    for (int v = 1; v <= 10; ++v) {
-        for (int count = 0; count < NUM_ELEMENTS / 10; ++count)
-            arr.push_back(v);
-    }
-    for (int v = 0; v < 10; ++v) {
-        shuffle(arr.begin() + v * (NUM_ELEMENTS / 10),
-                arr.begin() + (v + 1) * (NUM_ELEMENTS / 10), rng);
-    }
+    mt19937 rng(123);
+    uniform_int_distribution<int> dist(1, 10'000'000);
 
     for (int run = 1; run <= 10; ++run) {
-        vector<int> test_arr = arr;
-        test_arr.push_back(-1); // force reordering
+        vector<int> arr(n);
+
+        // First 95% sorted
+        for (int i = 0; i < n * 0.95; ++i) {
+            arr[i] = i + 1;
+        }
+
+        // Last 5% random
+        for (int i = n * 0.95; i < n; ++i) {
+            arr[i] = dist(rng);
+        }
 
         auto start = chrono::steady_clock::now();
-        vector<int> result = ladder(test_arr);
+        vector<int> result = ladder(arr);
         auto end = chrono::steady_clock::now();
 
-        total_time += chrono::duration<double>(end - start).count();
+        double duration = chrono::duration<double>(end - start).count();
+        total_time += duration;
     }
 
-    cout << "Average time (Few Unique + Stable Groups + Post-insert): "
+    cout << "Average time (95% sorted + 5% random): "
          << fixed << total_time / 10.0 << " seconds\n";
+
+    return 0;
 }
