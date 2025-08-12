@@ -1,4 +1,4 @@
-// g++ -O3 -std=c++17 -march=native bench_sorted_multi.cpp -o bench_sorted_multi
+// g++ -O3 -std=c++17 -march=native bench_random_multi.cpp -o bench_random_multi
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -7,6 +7,7 @@
 #include <iostream>
 #include <numeric>
 #include <queue>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,67 +16,52 @@
 static volatile uint64_t g_sink64 = 0;
 template<typename Vec>
 inline void consume(const Vec& v) {
-    uint64_t s = 0;
-    for (auto x : v) s += (uint64_t)x;
+    uint64_t s = 0; for (auto x : v) s += (uint64_t)x;
     g_sink64 ^= s;
 }
 
-//======================== Improved LadderSort (drop-in) =======================
-// Placement: leftmost ladder whose tail <= target (same behavior as before)
+//======================== LadderSort (optimized merge) ========================
+// place into the leftmost ladder whose tail <= target
 inline int find_ladder_index(const std::vector<int>& tops, int target) {
     int low = 0, high = (int)tops.size();
     while (low < high) {
         int mid = (low + high) / 2;
-        if (tops[mid] > target) low = mid + 1;
-        else high = mid;
+        if (tops[mid] > target) low = mid + 1; else high = mid;
     }
     return low;
 }
 
-// Pointer-based run for faster k-way merge
 struct Run { const int* cur; const int* end; };
-struct RunGreater {
-    bool operator()(const Run& a, const Run& b) const { return *a.cur > *b.cur; }
-};
+struct RunGreater { bool operator()(const Run& a, const Run& b) const { return *a.cur > *b.cur; } };
 
-// Faster k-way merge: exact reserve + pointer heap
 static std::vector<int> merge_ladders(const std::vector<std::vector<int>>& lists) {
     size_t total = 0; for (const auto& v : lists) total += v.size();
-    std::vector<int> merged; merged.reserve(total);
-
+    std::vector<int> out; out.reserve(total);
     std::vector<Run> heap_store; heap_store.reserve(lists.size());
     std::priority_queue<Run, std::vector<Run>, RunGreater> heap(RunGreater{}, std::move(heap_store));
-
-    for (const auto& v : lists) if (!v.empty())
-        heap.push(Run{ v.data(), v.data() + v.size() });
-
+    for (const auto& v : lists) if (!v.empty()) heap.push(Run{v.data(), v.data()+v.size()});
     while (!heap.empty()) {
         Run r = heap.top(); heap.pop();
-        merged.push_back(*r.cur++);
+        out.push_back(*r.cur++);
         if (r.cur != r.end) heap.push(r);
     }
-    return merged;
+    return out;
 }
 
 static std::vector<int> ladder_sort(const std::vector<int>& a) {
     if (a.empty()) return {};
     std::vector<std::vector<int>> lad; lad.reserve(64);
     std::vector<int> tops; tops.reserve(64);
-
-    lad.push_back({a[0]});
-    tops.push_back(a[0]);
-
+    lad.push_back({a[0]}); tops.push_back(a[0]);
     for (int i = 1, n = (int)a.size(); i < n; ++i) {
         int x = a[i];
         int idx = find_ladder_index(tops, x);
         if (idx == (int)lad.size()) { lad.emplace_back().emplace_back(x); tops.emplace_back(x); }
         else { lad[idx].emplace_back(x); tops[idx] = x; }
     }
-    // fast path is fine here
     if (lad.size() == 1) return lad[0];
     return merge_ladders(lad);
 }
-//====================== end Improved LadderSort section =======================
 
 //--------------------------- Quicksort (3-way, iterative) ---------------------
 static void quicksort3(std::vector<int>& a) {
@@ -90,8 +76,9 @@ static void quicksort3(std::vector<int>& a) {
             int pivot = std::max(std::min(i1,i2), std::min(std::max(i1,i2), i3)); // median-of-3
             int i=l, j=r, k=l;
             while (k <= j) {
-                if (a[k] < pivot) std::swap(a[i++], a[k++]);
-                else if (a[k] > pivot) std::swap(a[k], a[j--]);
+                int v = a[k];
+                if (v < pivot) std::swap(a[i++], a[k++]);
+                else if (v > pivot) std::swap(a[k], a[j--]);
                 else ++k;
             }
             if (i - l < r - j) { if (i-1 > l) st.push_back({l, i-1}); l = j+1; }
@@ -113,7 +100,6 @@ static void mergesort_rec(std::vector<int>& a, std::vector<int>& buf, int l, int
     int m = l + (r - l) / 2;
     mergesort_rec(a, buf, l, m);
     mergesort_rec(a, buf, m + 1, r);
-
     int i = l, j = m + 1, k = l;
     while (i <= m && j <= r) buf[k++] = (a[i] <= a[j]) ? a[i++] : a[j++];
     while (i <= m) buf[k++] = a[i++];
@@ -134,10 +120,7 @@ namespace timsort_lite {
         for (It i = first+1; i<last; ++i) {
             auto x = *i;
             It lo = first, hi = i;
-            while (lo < hi) {
-                It mid = lo + (hi-lo)/2;
-                if (*mid <= x) lo = mid+1; else hi = mid;
-            }
+            while (lo < hi) { It mid = lo + (hi-lo)/2; if (*mid <= x) lo = mid+1; else hi = mid; }
             for (It j = i; j > lo; --j) *j = *(j-1);
             *lo = x;
         }
@@ -154,7 +137,6 @@ namespace timsort_lite {
         if (n < 2) return;
         if ((int)buf.size() != n) buf.assign(n, 0);
         const int MINRUN = minrun_for(n);
-
         std::vector<std::pair<int,int>> runs; runs.reserve((n+MINRUN-1)/MINRUN);
         int i=0;
         while (i < n) {
@@ -171,7 +153,6 @@ namespace timsort_lite {
             runs.emplace_back(i, end);
             i = end;
         }
-
         while (runs.size() > 1) {
             std::vector<std::pair<int,int>> next;
             for (size_t k=0; k+1<runs.size(); k+=2) {
@@ -186,6 +167,15 @@ namespace timsort_lite {
     }
 }
 
+//--------------------------- Helpers: random bases ----------------------------
+static std::vector<int> make_random_vector(size_t n, uint64_t seed) {
+    std::vector<int> v(n);
+    std::mt19937_64 rng(seed);
+    std::uniform_int_distribution<int> dist(1, (int)n);
+    for (size_t i = 0; i < n; ++i) v[i] = dist(rng);
+    return v;
+}
+
 //--------------------------- Benchmark harness (time only) --------------------
 struct Result {
     std::string name;
@@ -195,24 +185,26 @@ struct Result {
 };
 
 template<typename Fn>
-static Result bench_algo(const std::string& name,
-                         const std::vector<int>& base,
-                         int rounds,
-                         Fn fn)
+static Result bench_algo_random(const std::string& name,
+                                size_t n,
+                                int rounds,
+                                uint64_t seed_base,
+                                Fn fn)
 {
     Result res; res.name = name;
 
-    // Warm-up (not timed)
+    // warm-up (not timed) with round 0 base
     {
+        auto base = make_random_vector(n, seed_base + 0x9E3779B97F4A7C15ULL * 0);
         std::vector<int> v = base;
         fn(v);
         consume(v);
     }
 
-    std::vector<double> times;
-    times.reserve(rounds);
-    for (int r=0; r<rounds; ++r) {
-        std::vector<int> v = base; // copy input
+    std::vector<double> times; times.reserve(rounds);
+    for (int r = 0; r < rounds; ++r) {
+        auto base = make_random_vector(n, seed_base + 0x9E3779B97F4A7C15ULL * (uint64_t)r);
+        std::vector<int> v = base; // identical base for each algo at this (n, r)
         auto t0 = std::chrono::steady_clock::now();
         fn(v);
         auto t1 = std::chrono::steady_clock::now();
@@ -222,15 +214,11 @@ static Result bench_algo(const std::string& name,
         res.ok = res.ok && std::is_sorted(v.begin(), v.end());
     }
 
-    // mean & stddev
     double sum = std::accumulate(times.begin(), times.end(), 0.0);
     double mean = sum / times.size();
-    double acc = 0.0;
-    for (double x : times) { double d = x - mean; acc += d*d; }
+    double acc = 0.0; for (double t : times) { double d = t - mean; acc += d*d; }
     double stdev = std::sqrt(acc / times.size());
-
-    res.avg_seconds = mean;
-    res.std_seconds = stdev;
+    res.avg_seconds = mean; res.std_seconds = stdev;
     return res;
 }
 
@@ -241,69 +229,61 @@ static void print_result(const Result& r) {
               << (r.ok ? "" : "  (! not sorted)") << "\n";
 }
 
+//----------------------------------- Main -------------------------------------
 struct BenchCase { size_t n; int rounds; };
 
 int main() {
     using namespace std;
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
-    cout << std::unitbuf; // flush each line
+    cout << std::unitbuf; // show progress line-by-line
 
-    // 1M, 10M, 100M (fewer rounds for larger n)
+    // Cases: 1M (10), 10M (5), 100M (3)
     const vector<BenchCase> cases = {
         {1'000'000ULL,   10},
         {10'000'000ULL,   5},
         {100'000'000ULL,  3}
     };
 
-    // Reusable scratch buffers (resized per case)
+    // reusable scratch buffers (so we don't pay alloc every call)
     static std::vector<int> g_merge_buf;
     static std::vector<int> g_tims_buf;
 
     for (const auto& C : cases) {
         const size_t n = C.n;
         const int rounds = C.rounds;
+        const uint64_t seed_base = 0x123456789ABCDEF0ULL ^ (uint64_t)n; // same across algos
 
-        vector<int> sorted_arr(n);
-        iota(sorted_arr.begin(), sorted_arr.end(), 1);
+        std::cout << "\n=== Random array, n=" << n << ", rounds=" << rounds << " ===\n\n";
 
-        cout << "\n=== Case 0: Sorted array, n=" << n << ", rounds=" << rounds << " ===\n\n";
-
-        auto r_ladder = bench_algo("LadderSort", sorted_arr, rounds, [](std::vector<int>& v){
+        auto r_ladder = bench_algo_random("LadderSort", n, rounds, seed_base, [](std::vector<int>& v){
             v = ladder_sort(v);
         });
 
-        auto r_tims = bench_algo("Timsort-lite", sorted_arr, rounds, [&](std::vector<int>& v){
-            timsort_lite::sort_with_buf(v, g_tims_buf); // reuse buffer
+        auto r_tims = bench_algo_random("Timsort-lite", n, rounds, seed_base, [&](std::vector<int>& v){
+            timsort_lite::sort_with_buf(v, g_tims_buf);
         });
 
-        // Quicksort (skip at 100M)
-        bool ran_qs = false;
-        Result r_quick;
-        if (n < 100'000'000ULL) {
-            r_quick = bench_algo("Quicksort", sorted_arr, rounds, [](std::vector<int>& v){
-                quicksort3(v);
-            });
-            ran_qs = true;
-        }
-
-        auto r_intro = bench_algo("Introsort", sorted_arr, rounds, [](std::vector<int>& v){
-            std::sort(v.begin(), v.end()); // C++ native sort
+        auto r_quick = bench_algo_random("Quicksort", n, rounds, seed_base, [](std::vector<int>& v){
+            quicksort3(v);
         });
 
-        auto r_stable = bench_algo("StableSort", sorted_arr, rounds, [](std::vector<int>& v){
-            std::stable_sort(v.begin(), v.end()); // another "internal" C++ sort
+        auto r_intro = bench_algo_random("Introsort", n, rounds, seed_base, [](std::vector<int>& v){
+            std::sort(v.begin(), v.end());
         });
 
-        auto r_merge = bench_algo("MergeSort", sorted_arr, rounds, [&](std::vector<int>& v){
-            mergesort_with_buf(v, g_merge_buf); // reuse buffer
+        auto r_stable = bench_algo_random("StableSort", n, rounds, seed_base, [](std::vector<int>& v){
+            std::stable_sort(v.begin(), v.end());
         });
 
-        cout << "Results (Sorted only):\n";
+        auto r_merge = bench_algo_random("MergeSort", n, rounds, seed_base, [&](std::vector<int>& v){
+            mergesort_with_buf(v, g_merge_buf);
+        });
+
+        std::cout << "Results (Random only):\n";
         print_result(r_ladder);
         print_result(r_tims);
-        if (ran_qs) print_result(r_quick);
-        else std::cout << std::left << std::setw(14) << "Quicksort" << " skipped at n=100,000,000\n";
+        print_result(r_quick);   // Quicksort measured in every scenario, as requested
         print_result(r_intro);
         print_result(r_stable);
         print_result(r_merge);

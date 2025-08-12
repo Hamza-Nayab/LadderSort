@@ -21,7 +21,6 @@ inline void consume(const Vec& v) {
 }
 
 //======================== Improved LadderSort (drop-in) =======================
-// Placement: leftmost ladder whose tail <= target (same behavior as before)
 inline int find_ladder_index(const std::vector<int>& tops, int target) {
     int low = 0, high = (int)tops.size();
     while (low < high) {
@@ -32,13 +31,9 @@ inline int find_ladder_index(const std::vector<int>& tops, int target) {
     return low;
 }
 
-// Pointer-based run for faster k-way merge
 struct Run { const int* cur; const int* end; };
-struct RunGreater {
-    bool operator()(const Run& a, const Run& b) const { return *a.cur > *b.cur; }
-};
+struct RunGreater { bool operator()(const Run& a, const Run& b) const { return *a.cur > *b.cur; } };
 
-// Faster k-way merge: exact reserve + pointer heap
 static std::vector<int> merge_ladders(const std::vector<std::vector<int>>& lists) {
     size_t total = 0; for (const auto& v : lists) total += v.size();
     std::vector<int> merged; merged.reserve(total);
@@ -71,7 +66,6 @@ static std::vector<int> ladder_sort(const std::vector<int>& a) {
         if (idx == (int)lad.size()) { lad.emplace_back().emplace_back(x); tops.emplace_back(x); }
         else { lad[idx].emplace_back(x); tops[idx] = x; }
     }
-    // fast path is fine here
     if (lad.size() == 1) return lad[0];
     return merge_ladders(lad);
 }
@@ -87,7 +81,7 @@ static void quicksort3(std::vector<int>& a) {
         while (l < r) {
             int m = l + (r-l)/2;
             int i1 = a[l], i2 = a[m], i3 = a[r];
-            int pivot = std::max(std::min(i1,i2), std::min(std::max(i1,i2), i3)); // median-of-3
+            int pivot = std::max(std::min(i1,i2), std::min(std::max(i1,i2), i3));
             int i=l, j=r, k=l;
             while (k <= j) {
                 if (a[k] < pivot) std::swap(a[i++], a[k++]);
@@ -113,7 +107,6 @@ static void mergesort_rec(std::vector<int>& a, std::vector<int>& buf, int l, int
     int m = l + (r - l) / 2;
     mergesort_rec(a, buf, l, m);
     mergesort_rec(a, buf, m + 1, r);
-
     int i = l, j = m + 1, k = l;
     while (i <= m && j <= r) buf[k++] = (a[i] <= a[j]) ? a[i++] : a[j++];
     while (i <= m) buf[k++] = a[i++];
@@ -222,7 +215,6 @@ static Result bench_algo(const std::string& name,
         res.ok = res.ok && std::is_sorted(v.begin(), v.end());
     }
 
-    // mean & stddev
     double sum = std::accumulate(times.begin(), times.end(), 0.0);
     double mean = sum / times.size();
     double acc = 0.0;
@@ -249,14 +241,13 @@ int main() {
     cin.tie(nullptr);
     cout << std::unitbuf; // flush each line
 
-    // 1M, 10M, 100M (fewer rounds for larger n)
+    // 10 rounds for every size
     const vector<BenchCase> cases = {
         {1'000'000ULL,   10},
-        {10'000'000ULL,   5},
-        {100'000'000ULL,  3}
+        {10'000'000ULL,  10},
+        {100'000'000ULL, 10}
     };
 
-    // Reusable scratch buffers (resized per case)
     static std::vector<int> g_merge_buf;
     static std::vector<int> g_tims_buf;
 
@@ -274,7 +265,7 @@ int main() {
         });
 
         auto r_tims = bench_algo("Timsort-lite", sorted_arr, rounds, [&](std::vector<int>& v){
-            timsort_lite::sort_with_buf(v, g_tims_buf); // reuse buffer
+            timsort_lite::sort_with_buf(v, g_tims_buf);
         });
 
         // Quicksort (skip at 100M)
@@ -288,15 +279,15 @@ int main() {
         }
 
         auto r_intro = bench_algo("Introsort", sorted_arr, rounds, [](std::vector<int>& v){
-            std::sort(v.begin(), v.end()); // C++ native sort
+            std::sort(v.begin(), v.end());
         });
 
         auto r_stable = bench_algo("StableSort", sorted_arr, rounds, [](std::vector<int>& v){
-            std::stable_sort(v.begin(), v.end()); // another "internal" C++ sort
+            std::stable_sort(v.begin(), v.end());
         });
 
         auto r_merge = bench_algo("MergeSort", sorted_arr, rounds, [&](std::vector<int>& v){
-            mergesort_with_buf(v, g_merge_buf); // reuse buffer
+            mergesort_with_buf(v, g_merge_buf);
         });
 
         cout << "Results (Sorted only):\n";
