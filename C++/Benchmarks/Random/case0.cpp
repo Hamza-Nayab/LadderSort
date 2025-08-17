@@ -71,6 +71,54 @@ static std::vector<int> ladder_sort(const std::vector<int>& a) {
 }
 //====================== end Improved LadderSort section =======================
 
+//=========================== Patience Sort (for compare) ======================
+static std::vector<int> patience_sort(const std::vector<int>& a) {
+    if (a.empty()) return {};
+
+    // Build piles: place x on the first pile with top >= x
+    std::vector<std::vector<int>> piles;
+    std::vector<int> tops; tops.reserve(64);
+    piles.reserve(64);
+
+    for (int x : a) {
+        int low = 0, high = (int)tops.size();
+        while (low < high) {
+            int mid = (low + high) / 2;
+            if (tops[mid] < x) low = mid + 1; else high = mid;
+        }
+        if (low == (int)piles.size()) {
+            piles.emplace_back().push_back(x);
+            tops.push_back(x);
+        } else {
+            piles[low].push_back(x);
+            tops[low] = x;  // maintain nondecreasing tops
+        }
+    }
+
+    // K-way merge of pile backs (each pile's sequence is nonincreasing by construction)
+    struct Node { int val; int p; }; // p = pile index
+    struct Cmp { bool operator()(const Node& a, const Node& b) const { return a.val > b.val; } };
+
+    std::priority_queue<Node, std::vector<Node>, Cmp> pq;
+    for (int i = 0; i < (int)piles.size(); ++i) {
+        pq.push({piles[i].back(), i});
+        piles[i].pop_back();
+    }
+
+    std::vector<int> out; out.reserve(a.size());
+    while (!pq.empty()) {
+        auto t = pq.top(); pq.pop();
+        out.push_back(t.val);
+        int p = t.p;
+        if (!piles[p].empty()) {
+            pq.push({piles[p].back(), p});
+            piles[p].pop_back();
+        }
+    }
+    return out;
+}
+//====================== end Patience Sort section ============================
+
 //--------------------------- Quicksort (3-way, iterative) ---------------------
 static void quicksort3(std::vector<int>& a) {
     struct Range { int l, r; };
@@ -207,7 +255,7 @@ static Result bench_algo(const std::string& name,
     for (int r=0; r<rounds; ++r) {
         std::vector<int> v = base; // copy input
         auto t0 = std::chrono::steady_clock::now();
-        fn(v);
+        fn(v);                     // ALL allocations happen inside here
         auto t1 = std::chrono::steady_clock::now();
         consume(v);
         double dt = std::chrono::duration<double>(t1 - t0).count();
@@ -248,9 +296,6 @@ int main() {
         {100'000'000ULL, 10}
     };
 
-    static std::vector<int> g_merge_buf;
-    static std::vector<int> g_tims_buf;
-
     for (const auto& C : cases) {
         const size_t n = C.n;
         const int rounds = C.rounds;
@@ -261,11 +306,16 @@ int main() {
         cout << "\n=== Case 0: Sorted array, n=" << n << ", rounds=" << rounds << " ===\n\n";
 
         auto r_ladder = bench_algo("LadderSort", sorted_arr, rounds, [](std::vector<int>& v){
-            v = ladder_sort(v);
+            v = ladder_sort(v);                  // allocs counted
         });
 
-        auto r_tims = bench_algo("Timsort-lite", sorted_arr, rounds, [&](std::vector<int>& v){
-            timsort_lite::sort_with_buf(v, g_tims_buf);
+        auto r_pat = bench_algo("PatienceSort", sorted_arr, rounds, [](std::vector<int>& v){
+            v = patience_sort(v);                // allocs counted
+        });
+
+        auto r_tims = bench_algo("Timsort-lite", sorted_arr, rounds, [](std::vector<int>& v){
+            std::vector<int> buf;                // alloc inside timing
+            timsort_lite::sort_with_buf(v, buf);
         });
 
         // Quicksort (skip at 100M)
@@ -273,25 +323,27 @@ int main() {
         Result r_quick;
         if (n < 100'000'000ULL) {
             r_quick = bench_algo("Quicksort", sorted_arr, rounds, [](std::vector<int>& v){
-                quicksort3(v);
+                quicksort3(v);                   // in-place
             });
             ran_qs = true;
         }
 
         auto r_intro = bench_algo("Introsort", sorted_arr, rounds, [](std::vector<int>& v){
-            std::sort(v.begin(), v.end());
+            std::sort(v.begin(), v.end());       // in-place
         });
 
         auto r_stable = bench_algo("StableSort", sorted_arr, rounds, [](std::vector<int>& v){
-            std::stable_sort(v.begin(), v.end());
+            std::stable_sort(v.begin(), v.end()); // typically allocs internally; counted
         });
 
-        auto r_merge = bench_algo("MergeSort", sorted_arr, rounds, [&](std::vector<int>& v){
-            mergesort_with_buf(v, g_merge_buf);
+        auto r_merge = bench_algo("MergeSort", sorted_arr, rounds, [](std::vector<int>& v){
+            std::vector<int> buf;                 // alloc inside timing
+            mergesort_with_buf(v, buf);
         });
 
         cout << "Results (Sorted only):\n";
         print_result(r_ladder);
+        print_result(r_pat);
         print_result(r_tims);
         if (ran_qs) print_result(r_quick);
         else std::cout << std::left << std::setw(14) << "Quicksort" << " skipped at n=100,000,000\n";

@@ -6,45 +6,36 @@
 
 using namespace std;
 
-// Merge Sort implementation
-void merge(vector<int>& arr, int left, int mid, int right) {
-    int n1 = mid - left + 1;
-    int n2 = right - mid;
-
-    // Create temp arrays
-    vector<int> L(n1), R(n2);
-
-    // Copy data to temp arrays
-    for (int i = 0; i < n1; ++i)
-        L[i] = arr[left + i];
-    for (int j = 0; j < n2; ++j)
-        R[j] = arr[mid + 1 + j];
-
-    // Merge the temp arrays back into arr[left..right]
-    int i = 0, j = 0, k = left;
-    while (i < n1 && j < n2) {
-        if (L[i] <= R[j])
-            arr[k++] = L[i++];
-        else
-            arr[k++] = R[j++];
+/// Stable mergesort with single reusable buffer and small-run cutoff.
+static void mergesort(std::vector<int>& a, std::vector<int>& buf, int l, int r) {
+    const int INSERTION_CUTOFF = 32;
+    if (r - l <= INSERTION_CUTOFF) {
+        for (int i = l + 1; i <= r; ++i) {
+            int x = a[i], j = i - 1;
+            while (j >= l && a[j] > x) { a[j + 1] = a[j]; --j; }
+            a[j + 1] = x;
+        }
+        return;
     }
+    int m = l + (r - l) / 2;
+    mergesort(a, buf, l, m);
+    mergesort(a, buf, m + 1, r);
 
-    // Copy any remaining elements of L[]
-    while (i < n1)
-        arr[k++] = L[i++];
+    // If already ordered, skip merge (helps nearly-sorted cases)
+    if (a[m] <= a[m + 1]) return;
 
-    // Copy any remaining elements of R[]
-    while (j < n2)
-        arr[k++] = R[j++];
+    int i = l, j = m + 1, k = l;
+    while (i <= m && j <= r) buf[k++] = (a[i] <= a[j]) ? a[i++] : a[j++];
+    while (i <= m) buf[k++] = a[i++];
+    while (j <= r) buf[k++] = a[j++];
+
+    for (i = l; i <= r; ++i) a[i] = buf[i];
 }
 
-void merge_sort(vector<int>& arr, int left, int right) {
-    if (left >= right) return;
-
-    int mid = left + (right - left) / 2;
-    merge_sort(arr, left, mid);
-    merge_sort(arr, mid + 1, right);
-    merge(arr, left, mid, right);
+static void mergesort_with_buf(std::vector<int>& a) {
+    if (a.empty()) return;
+    std::vector<int> buf(a.size());       // one allocation
+    mergesort(a, buf, 0, (int)a.size() - 1);
 }
 
 // Benchmark function
@@ -59,14 +50,14 @@ int main() {
         cout << "Run #" << run << ":\n";
 
         // Generate data
-        vector<int> original(100'000'000);
+        vector<int> original(10'000'000);
         for (int i = 0; i < original.size(); ++i)
             original[i] = dist(rng);
 
         // Initial sort
         vector<int> data = original;  // copy
         auto start = chrono::high_resolution_clock::now();
-        merge_sort(data, 0, data.size() - 1);
+        mergesort_with_buf(data);
         auto end = chrono::high_resolution_clock::now();
         chrono::duration<double> duration = end - start;
         cout << "  Merge sort time: " << duration.count() << " seconds\n";
@@ -80,7 +71,7 @@ int main() {
         // Post-insert sort
         data.push_back(500);
         start = chrono::high_resolution_clock::now();
-        merge_sort(data, 0, data.size() - 1);
+        mergesort_with_buf(data);
         end = chrono::high_resolution_clock::now();
         duration = end - start;
         cout << "  Post-insert merge sort time: " << duration.count() << " seconds\n";
@@ -95,4 +86,3 @@ int main() {
 
     return 0;
 }
-

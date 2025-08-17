@@ -7,12 +7,12 @@
 
 using namespace std;
 
-// Ladder index binary search
-inline int binary_search_lad(const vector<vector<int>>& lad, int target) {
-    int low = 0, high = lad.size();
+// Ladder index binary search over flat 'tops' array
+inline int binary_search_lad(const vector<int>& tops, int target) {
+    int low = 0, high = (int)tops.size();
     while (low < high) {
         int mid = (low + high) / 2;
-        if (lad[mid].back() > target)
+        if (tops[mid] > target)
             low = mid + 1;
         else
             high = mid;
@@ -30,11 +30,14 @@ struct HeapItem {
 
 // Merging ladders
 vector<int> merge_ladders(const vector<vector<int>>& lists) {
+    size_t total = 0;
+    for (const auto& v : lists) total += v.size();
+
     vector<int> merged;
-    merged.reserve(10'000'000); // expected output size
+    merged.reserve(total);
 
     priority_queue<HeapItem, vector<HeapItem>, greater<HeapItem>> heap;
-    for (int i = 0; i < lists.size(); ++i) {
+    for (int i = 0; i < (int)lists.size(); ++i) {
         if (!lists[i].empty())
             heap.push({lists[i][0], i, 0});
     }
@@ -45,31 +48,39 @@ vector<int> merge_ladders(const vector<vector<int>>& lists) {
 
         const auto& curr = lists[top.list_idx];
         int next_idx = top.elem_idx + 1;
-        if (next_idx < curr.size())
+        if (next_idx < (int)curr.size())
             heap.push({curr[next_idx], top.list_idx, next_idx});
     }
 
     return merged;
 }
 
-// Ladder Sort
+// Ladder Sort with 1D binary search on 'tops'
 vector<int> ladder(const vector<int>& array) {
     if (array.empty()) return {};
 
     vector<vector<int>> lad;
-    lad.reserve(64); // reserve for fewer reallocs
-    lad.push_back({array[0]});
+    lad.reserve(64);
 
-    for (int i = 1, n = array.size(); i < n; ++i) {
+    vector<int> tops;
+    tops.reserve(64);
+
+    lad.push_back({array[0]});
+    tops.push_back(array[0]);
+
+    for (int i = 1, n = (int)array.size(); i < n; ++i) {
         int a = array[i];
-        int idx = binary_search_lad(lad, a);
-        if (idx == lad.size()) {
+        int idx = binary_search_lad(tops, a);
+        if (idx == (int)lad.size()) {
             lad.emplace_back().emplace_back(a);
+            tops.emplace_back(a);
         } else {
             lad[idx].emplace_back(a);
+            tops[idx] = a; // update top for that run
         }
     }
 
+    if (lad.size() == 1) return lad[0];
     return merge_ladders(lad);
 }
 
