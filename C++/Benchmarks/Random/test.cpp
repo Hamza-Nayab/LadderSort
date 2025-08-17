@@ -389,12 +389,10 @@ namespace timsort {
 
             // gallop mode
             while (true) {
-                // number from a to copy (from the right)
                 int gr = len1 - gallop_right(buf[j], a, base1, len1, i - base1);
                 int take1 = gr;
                 if (take1) {
-                    k -= take1;
-                    i -= take1;
+                    k -= take1; i -= take1;
                     std::copy_backward(a.begin()+i+1, a.begin()+i+1+take1, a.begin()+k+1+take1);
                     len1 -= take1;
                     if (len1 == 0) { std::copy(buf.begin(), buf.begin()+len2, a.begin() + (k - len2 + 1)); return; }
@@ -404,8 +402,7 @@ namespace timsort {
                 int gl = len2 - gallop_left(a[i], buf, 0, len2, j);
                 int take2 = gl;
                 if (take2) {
-                    k -= take2;
-                    j -= take2;
+                    k -= take2; j -= take2;
                     std::copy(buf.begin()+j+1, buf.begin()+j+1+take2, a.begin()+k+1);
                     len2 -= take2;
                     if (len2 == 0) return;
@@ -447,7 +444,7 @@ namespace timsort {
         int n = (int)s.size();
         if (n >= 3) {
             int A = s[n-3].len, B = s[n-2].len, C = s[n-1].len;
-            if (A < C) return n-3; else return n-2;
+            return (A < C) ? n-3 : n-2;
         }
         return n-2;
     }
