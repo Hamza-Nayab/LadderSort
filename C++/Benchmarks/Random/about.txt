@@ -6,3 +6,17 @@ Case 4 = Few Unique and stable groups
 Case 5 = Reverse
 Case 6 = 95% sorted 5% Random
 Case 7 = 10 unique elements at the end.
+
+Best Cases:
+1:
+og/event compaction from Kafka (or sharded logs): each partition is time-sorted, a consumer reads partitions round-robin into one file, then you need a global time sort.
+
+Multi-sensor/time-series fusion: each sensor stream is monotone in time; a recorder multiplexes samples round-robin; later you sort by timestamp.
+
+Inverted-index / posting-list merges: per-shard lists are sorted by docID; batches get interleaved on write; final build does a global merge-sort.
+
+Distributed ETL/warehouse coalesce: Spark/DB partitions emit locally sorted chunks; a writer interleaves them; final compaction sorts into one ordered table.
+
+(The “push_back(-1)” mimics a late, out-of-order record—e.g., a log with an earlier timestamp arriving after the batch.)
+
+2: Riffle two sorted halves by coin-flip
