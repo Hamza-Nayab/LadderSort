@@ -20,3 +20,7 @@ Distributed ETL/warehouse coalesce: Spark/DB partitions emit locally sorted chun
 (The “push_back(-1)” mimics a late, out-of-order record—e.g., a log with an earlier timestamp arriving after the batch.)
 
 2: Riffle two sorted halves by coin-flip
+It models two already-sorted streams randomly interleaved (e.g., merging two database partitions or two sensor/log feeds); you just need a global re-sort.
+Great for run-aware merges (LadderSort, mergesort/Timsort) and for testing recovery from a late out-of-order record (your push_back(-1) step).
+
+3: Strided-by-K from a sorted array
