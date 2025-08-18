@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 #include <climits>
+#include <iterator>
+#include <functional>
 
 using std::size_t;
 
@@ -251,258 +253,174 @@ static void mergesort_with_buf(std::vector<int>& a, std::vector<int>& buf) {
     mergesort_rec(a, buf, 0, (int)a.size() - 1);
 }
 
-//=========================== Proper Timsort (stable) ==========================
-namespace timsort {
-    struct Run { int base; int len; };
+//=========================== Minimal (faithful) Timsort =======================
+// - Stable
+// - Natural run detection + reversal
+// - Dynamic minrun computation
+// - Run stack + invariants (Tim Peters)
+// - Merges use a temporary buffer for the smaller run (no fancy gallop to keep minimality)
+//   (Still performs very well on near-sorted data.)
+namespace tiny_timsort {
 
-    static inline int minrun_for(size_t n) {
-        int r = 0;
-        while (n >= 64) { r |= (n & 1U); n >>= 1U; }
-        return (int)n + r;
+struct Run { int base; int len; };
+
+static inline std::size_t minrun_len(std::size_t n) {
+    std::size_t r = 0;
+    while (n >= 64) { r |= (n & 1u); n >>= 1u; }
+    return n + r; // in [32,64]
+}
+
+// Detect a natural run starting at 'lo' (exclusive hi), make ascending; return length
+static int count_run_and_make_ascending(std::vector<int>& a, int lo, int hi) {
+    int run_hi = lo + 1;
+    if (run_hi >= hi) return 1;
+
+    // Descending?
+    if (a[run_hi++] < a[lo]) {
+        while (run_hi < hi && a[run_hi] < a[run_hi - 1]) ++run_hi;
+        std::reverse(a.begin() + lo, a.begin() + run_hi);
+    } else {
+        while (run_hi < hi && a[run_hi] >= a[run_hi - 1]) ++run_hi;
     }
+    return run_hi - lo;
+}
 
-    template<typename It>
-    static inline void binary_insert(It first, It last) {
-        for (It i = first + 1; i < last; ++i) {
-            auto x = *i;
-            It lo = first, hi = i;
-            while (lo < hi) {
-                It mid = lo + (hi - lo) / 2;
-                if (*mid <= x) lo = mid + 1; else hi = mid;
-            }
-            for (It j = i; j > lo; --j) *j = *(j - 1);
-            *lo = x;
+// Binary insertion sort on [first,last), starting at 'start' (stable)
+static inline void binary_insertion_sort(std::vector<int>& a, int first, int last, int start) {
+    if (first == start) ++start;
+    for (int i = start; i < last; ++i) {
+        int x = a[i];
+        int lo = first, hi = i;
+        while (lo < hi) {
+            int mid = lo + ((hi - lo) >> 1);
+            if (a[mid] <= x) lo = mid + 1; else hi = mid; // stable: equals to the right
         }
+        for (int j = i; j > lo; --j) a[j] = a[j-1];
+        a[lo] = x;
     }
+}
 
-    // Galloping helpers (return insertion index)
-    static int gallop_left(int key, const std::vector<int>& a, int base, int len, int hint) {
-        int last_ofs = 0, ofs = 1;
-        if (key > a[base + hint]) {
-            int max_ofs = len - hint;
-            while (ofs < max_ofs && key > a[base + hint + ofs]) { last_ofs = ofs; ofs = (ofs << 1) + 1; }
-            if (ofs > max_ofs) ofs = max_ofs;
-            last_ofs += hint; ofs += hint;
-        } else {
-            int max_ofs = hint + 1;
-            while (ofs < max_ofs && key <= a[base + hint - ofs]) { last_ofs = ofs; ofs = (ofs << 1) + 1; }
-            if (ofs > max_ofs) ofs = max_ofs;
-            int tmp = last_ofs; last_ofs = hint - ofs; ofs = hint - tmp;
-        }
-        ++last_ofs;
-        while (last_ofs < ofs) {
-            int m = last_ofs + ((ofs - last_ofs) >> 1);
-            if (key > a[base + m]) last_ofs = m + 1;
-            else ofs = m;
-        }
-        return ofs;
+// Merge helpers: choose smaller side to buffer for stability & cache friendliness
+static void merge_lo(std::vector<int>& a, int base1, int len1, int base2, int len2) {
+    std::vector<int> tmp(len1);
+    std::copy(a.begin() + base1, a.begin() + base1 + len1, tmp.begin());
+
+    int i = 0;            // in tmp
+    int j = base2;        // in a
+    int dest = base1;     // in a
+
+    while (i < len1 && j < base2 + len2) {
+        if (a[j] < tmp[i]) a[dest++] = a[j++];
+        else               a[dest++] = tmp[i++];
     }
+    // copy remainder
+    if (i < len1) std::copy(tmp.begin() + i, tmp.end(), a.begin() + dest);
+    // right remainder already in place
+}
 
-    static int gallop_right(int key, const std::vector<int>& a, int base, int len, int hint) {
-        int last_ofs = 0, ofs = 1;
-        if (key < a[base + hint]) {
-            int max_ofs = hint + 1;
-            while (ofs < max_ofs && key < a[base + hint - ofs]) { last_ofs = ofs; ofs = (ofs << 1) + 1; }
-            if (ofs > max_ofs) ofs = max_ofs;
-            int tmp = last_ofs; last_ofs = hint - ofs; ofs = hint - tmp;
-        } else {
-            int max_ofs = len - hint;
-            while (ofs < max_ofs && key >= a[base + hint + ofs]) { last_ofs = ofs; ofs = (ofs << 1) + 1; }
-            if (ofs > max_ofs) ofs = max_ofs;
-            last_ofs += hint; ofs += hint;
-        }
-        ++last_ofs;
-        while (last_ofs < ofs) {
-            int m = last_ofs + ((ofs - last_ofs) >> 1);
-            if (key < a[base + m]) ofs = m;
-            else last_ofs = m + 1;
-        }
-        return ofs;
+static void merge_hi(std::vector<int>& a, int base1, int len1, int base2, int len2) {
+    std::vector<int> tmp(len2);
+    std::copy(a.begin() + base2, a.begin() + base2 + len2, tmp.begin());
+
+    int i = base1 + len1 - 1; // in a
+    int j = len2 - 1;         // in tmp
+    int dest = base2 + len2 - 1;
+
+    while (i >= base1 && j >= 0) {
+        if (tmp[j] < a[i]) a[dest--] = a[i--];
+        else               a[dest--] = tmp[j--];
     }
-
-    static int min_gallop = 7;
-
-    static void ensure_capacity(std::vector<int>& buf, int need) {
-        if ((int)buf.size() < need) buf.resize(need);
+    if (j >= 0) {
+        // move remaining tmp to front
+        std::copy(tmp.begin(), tmp.begin() + (j + 1), a.begin() + base1);
     }
+}
 
-    static void merge_lo(std::vector<int>& a, int base1, int len1,
-                         int base2, int len2, std::vector<int>& buf) {
-        ensure_capacity(buf, len1);
-        std::copy(a.begin()+base1, a.begin()+base1+len1, buf.begin());
-        int i = 0, j = base2, k = base1;
-        if (len1 == 0 || len2 == 0) return;
+static void merge_at(std::vector<int>& a, int base1, int len1, int base2, int len2) {
+    // pre-trim via binary gallop at the borders to avoid work (optional but cheap)
+    // trim left run's head against first of right run
+    int k = (int)(std::upper_bound(a.begin() + base1, a.begin() + base1 + len1, a[base2]) - (a.begin() + base1));
+    base1 += k; len1 -= k;
+    if (len1 == 0) return; // already ordered
+    // trim right run's tail against last of left run
+    int j = (int)(std::lower_bound(a.begin() + base2, a.begin() + base2 + len2, a[base1 + len1 - 1]) - (a.begin() + base2));
+    len2 = j;
+    if (len2 == 0) return;
 
-        int mg = min_gallop;
-        while (true) {
-            int count1 = 0, count2 = 0;
-            // pairwise mode
-            do {
-                if (a[j] < buf[i]) { a[k++] = a[j++]; ++count2; count1 = 0; if (--len2 == 0) goto copy_left; }
-                else               { a[k++] = buf[i++]; ++count1; count2 = 0; if (--len1 == 0) return;      }
-            } while ( (count1 | count2) < mg );
+    if (len1 <= len2) merge_lo(a, base1, len1, base2, len2);
+    else              merge_hi(a, base1, len1, base2, len2);
+}
 
-            // gallop mode
-            while (true) {
-                int right_idx = gallop_right(a[j], buf, 0, len1, i);
-                int take1 = right_idx - i;
-                if (take1) {
-                    std::copy(buf.begin()+i, buf.begin()+right_idx, a.begin()+k);
-                    k += take1; i = right_idx; len1 -= take1;
-                    if (len1 == 0) return;
-                }
-                a[k++] = a[j++]; if (--len2 == 0) goto copy_left;
+static inline bool collapse_needed(const std::vector<Run>& s) {
+    int n = (int)s.size();
+    if (n <= 1) return false;
+    if (n == 2) return s[0].len <= s[1].len;
+    int A = s[n-3].len, B = s[n-2].len, C = s[n-1].len;
+    return (A <= B + C) || (B <= C);
+}
 
-                int left_cnt = gallop_left(buf[i], a, j, len2, 0);
-                int take2 = left_cnt;
-                if (take2) {
-                    std::copy(a.begin()+j, a.begin()+j+take2, a.begin()+k);
-                    k += take2; j += take2; len2 -= take2;
-                    if (len2 == 0) goto copy_left;
-                }
-                a[k++] = buf[i++]; if (--len1 == 0) return;
-
-                if (take1 < mg && take2 < mg) break; // leave gallop
-                if (mg > 1) --mg;
-            }
-            mg += 2;
-        }
-    copy_left:
-        std::copy(buf.begin()+i, buf.begin()+i+len1, a.begin()+k);
+static inline int pick_merge_idx(const std::vector<Run>& s) {
+    int n = (int)s.size();
+    if (n >= 3) {
+        int A = s[n-3].len, C = s[n-1].len;
+        return (A < C) ? (n - 3) : (n - 2);
     }
+    return n - 2;
+}
 
-    static void merge_hi(std::vector<int>& a, int base1, int len1,
-                         int base2, int len2, std::vector<int>& buf) {
-        ensure_capacity(buf, len2);
-        std::copy(a.begin()+base2, a.begin()+base2+len2, buf.begin());
-        int i = base1 + len1 - 1, j = len2 - 1, k = base2 + len2 - 1;
-        if (len1 == 0 || len2 == 0) return;
+static void merge_stack_top(std::vector<int>& a, std::vector<Run>& st, int idx) {
+    int base1 = st[idx].base, len1 = st[idx].len;
+    int base2 = st[idx+1].base, len2 = st[idx+1].len;
+    merge_at(a, base1, len1, base2, len2);
+    st[idx].len = len1 + len2;
+    st.erase(st.begin() + idx + 1);
+}
 
-        int mg = min_gallop;
-        while (true) {
-            int count1 = 0, count2 = 0;
-            // pairwise mode (from the right)
-            do {
-                if (buf[j] < a[i]) { a[k--] = a[i--]; ++count1; count2 = 0; if (--len1 == 0) { std::copy(buf.begin(), buf.begin()+len2, a.begin() + (k - len2 + 1)); return; } }
-                else               { a[k--] = buf[j--]; ++count2; count1 = 0; if (--len2 == 0) return; }
-            } while ( (count1 | count2) < mg );
-
-            // gallop mode
-            while (true) {
-                int gr = len1 - gallop_right(buf[j], a, base1, len1, i - base1);
-                int take1 = gr;
-                if (take1) {
-                    k -= take1; i -= take1;
-                    std::copy_backward(a.begin()+i+1, a.begin()+i+1+take1, a.begin()+k+1+take1);
-                    len1 -= take1;
-                    if (len1 == 0) { std::copy(buf.begin(), buf.begin()+len2, a.begin() + (k - len2 + 1)); return; }
-                }
-                a[k--] = buf[j--]; if (--len2 == 0) return;
-
-                int gl = len2 - gallop_left(a[i], buf, 0, len2, j);
-                int take2 = gl;
-                if (take2) {
-                    k -= take2; j -= take2;
-                    std::copy(buf.begin()+j+1, buf.begin()+j+1+take2, a.begin()+k+1);
-                    len2 -= take2;
-                    if (len2 == 0) return;
-                }
-                a[k--] = a[i--]; if (--len1 == 0) { std::copy(buf.begin(), buf.begin()+len2, a.begin() + (k - len2 + 1)); return; }
-
-                if (take1 < mg && take2 < mg) break; // leave gallop
-                if (mg > 1) --mg;
-            }
-            mg += 2;
-        }
+static void merge_collapse(std::vector<int>& a, std::vector<Run>& st) {
+    while (collapse_needed(st)) {
+        int i = pick_merge_idx(st);
+        merge_stack_top(a, st, i);
     }
+}
 
-    static int count_run_and_make_ascending(std::vector<int>& a, int lo, int hi) {
-        int run_hi = lo + 1;
-        if (run_hi == hi) return 1;
-        if (a[run_hi++] < a[lo]) { // descending
-            while (run_hi < hi && a[run_hi] < a[run_hi - 1]) ++run_hi;
-            std::reverse(a.begin()+lo, a.begin()+run_hi);
-        } else { // ascending
-            while (run_hi < hi && a[run_hi] >= a[run_hi - 1]) ++run_hi;
-        }
-        return run_hi - lo;
+static void merge_force_collapse(std::vector<int>& a, std::vector<Run>& st) {
+    while (st.size() > 1) {
+        int n = (int)st.size();
+        int i = (n >= 3 && st[n-3].len < st[n-1].len) ? (n - 3) : (n - 2);
+        merge_stack_top(a, st, i);
     }
+}
 
-    static void push_run(std::vector<Run>& stack, int base, int len) {
-        stack.push_back({base, len});
+// Public API for vector<int>. Minimal to match this benchmark.
+static void timsort(std::vector<int>& a) {
+    const int n = (int)a.size();
+    if (n < 2) return;
+
+    const int minrun = (int)minrun_len((std::size_t)n);
+    std::vector<Run> st; st.reserve((n + minrun - 1) / minrun);
+
+    int lo = 0;
+    while (lo < n) {
+        int run_len = count_run_and_make_ascending(a, lo, n);
+        int need = (run_len < minrun) ? std::min(minrun, n - lo) : run_len;
+        binary_insertion_sort(a, lo, lo + need, lo + run_len);
+        st.push_back({lo, need});
+        lo += need;
+        merge_collapse(a, st);
     }
+    merge_force_collapse(a, st);
+}
 
-    static bool collapse_needed(const std::vector<Run>& s) {
-        int n = (int)s.size();
-        if (n <= 1) return false;
-        if (n == 2) return s[n-2].len <= s[n-1].len;
-        int A = s[n-3].len, B = s[n-2].len, C = s[n-1].len;
-        return (A <= B + C) || (B <= C);
-    }
+// Generic iterator overload (kept for convenience)
+template<class RandomIt>
+void timsort(RandomIt first, RandomIt last) {
+    using T = typename std::iterator_traits<RandomIt>::value_type;
+    std::vector<T> tmp(first, last);
+    timsort(tmp);
+    std::move(tmp.begin(), tmp.end(), first);
+}
 
-    static int pick_merge_idx(const std::vector<Run>& s) {
-        int n = (int)s.size();
-        if (n >= 3) {
-            int A = s[n-3].len, B = s[n-2].len, C = s[n-1].len;
-            return (A < C) ? n-3 : n-2;
-        }
-        return n-2;
-    }
-
-    static void merge_at(std::vector<int>& a, std::vector<Run>& s, int i, std::vector<int>& buf) {
-        int base1 = s[i].base, len1 = s[i].len;
-        int base2 = s[i+1].base, len2 = s[i+1].len;
-
-        // Keep original concatenation for the run stack update
-        const int orig_base = base1;
-        const int orig_len  = len1 + len2;
-
-        // Gallop/trim borders (stable)
-        int k = gallop_right(a[base2], a, base1, len1, 0);
-        base1 += k; len1 -= k;
-        if (len1 == 0) { s[i] = { orig_base, orig_len }; s.erase(s.begin() + i + 1); return; }
-
-        len2 = gallop_left(a[base1 + len1 - 1], a, base2, len2, len2 - 1);
-        if (len2 == 0) { s[i] = { orig_base, orig_len }; s.erase(s.begin() + i + 1); return; }
-
-        if (len1 <= len2) merge_lo(a, base1, len1, base2, len2, buf);
-        else              merge_hi(a, base1, len1, base2, len2, buf);
-
-        // Merged run covers the entire concatenation
-        s[i] = { orig_base, orig_len };
-        s.erase(s.begin() + i + 1);
-    }
-
-    static void force_collapse(std::vector<int>& a, std::vector<Run>& s, std::vector<int>& buf) {
-        while (s.size() > 1) {
-            int i = (s.size() >= 3 && s[s.size()-3].len < s[s.size()-1].len) ? (int)s.size()-3 : (int)s.size()-2;
-            merge_at(a, s, i, buf);
-        }
-    }
-
-    static void sort_with_buf(std::vector<int>& a, std::vector<int>& buf) {
-        const int n = (int)a.size();
-        if (n < 2) return;
-
-        int minrun = minrun_for(n);
-        std::vector<Run> runs; runs.reserve((n + minrun - 1) / minrun);
-
-        int lo = 0;
-        while (lo < n) {
-            int run_len = count_run_and_make_ascending(a, lo, n);
-            int need = (run_len < minrun) ? std::min(minrun, n - lo) : run_len;
-            binary_insert(a.begin()+lo, a.begin()+lo+need); // pad to minrun
-            push_run(runs, lo, need);
-            lo += need;
-
-            while (collapse_needed(runs)) {
-                int i = pick_merge_idx(runs);
-                merge_at(a, runs, i, buf);
-            }
-        }
-        force_collapse(a, runs, buf);
-    }
-} // namespace timsort
+} // namespace tiny_timsort
 
 //=========================== Benchmark harness (time only) ====================
 struct Result {
@@ -572,8 +490,7 @@ int main() {
         {100'000'000ULL, 10}
     };
 
-    static std::vector<int> g_merge_buf;
-    static std::vector<int> g_tims_buf;
+    static std::vector<int> g_merge_buf; // (kept for mergesort variant)
 
     for (const auto& C : cases) {
         const size_t n = C.n;
@@ -592,23 +509,23 @@ int main() {
         });
 
         auto r_tims = bench_algo_postinsert("Timsort", sorted_base, rounds, [&](std::vector<int>& v){
-            timsort::sort_with_buf(v, g_tims_buf);        // stable; reusable buffer
+            tiny_timsort::timsort(v);             // stable Timsort (integrated)
         });
 
         auto r_quick = bench_algo_postinsert("Quicksort", sorted_base, rounds, [](std::vector<int>& v){
-            quicksort3(v);                                 // adaptive pivot; in-place
+            quicksort3(v);                         // adaptive pivot; in-place
         });
 
         auto r_intro = bench_algo_postinsert("Introsort", sorted_base, rounds, [](std::vector<int>& v){
-            std::sort(v.begin(), v.end());                 // in-place
+            std::sort(v.begin(), v.end());         // in-place
         });
 
         auto r_stable = bench_algo_postinsert("StableSort", sorted_base, rounds, [](std::vector<int>& v){
-            std::stable_sort(v.begin(), v.end());          // library allocs counted
+            std::stable_sort(v.begin(), v.end());  // library allocs counted
         });
 
         auto r_merge = bench_algo_postinsert("MergeSort", sorted_base, rounds, [&](std::vector<int>& v){
-            mergesort_with_buf(v, g_merge_buf);            // reusable buf
+            mergesort_with_buf(v, g_merge_buf);    // reusable buf
         });
 
         std::cout << "Results (Post-insert only):\n";
