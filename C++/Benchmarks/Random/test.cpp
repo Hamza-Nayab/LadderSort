@@ -303,16 +303,16 @@ static inline std::size_t minrun_len(std::size_t n) {
     return n + r; // in [32,64]
 }
 
-// Find a natural run starting at lo, reverse if descending, return length.
+// Detect a natural run starting at lo, reverse if descending, return length.
 static int count_run_and_make_ascending(std::vector<int>& a, int lo, int hi) {
     int run_hi = lo + 1;
     if (run_hi >= hi) return 1;
 
     if (a[run_hi] < a[lo]) { // strictly descending
-        do { ++run_hi; } while (run_hi < hi && a[run_hi] < a[run_hi - 1]);
+        while (++run_hi < hi && a[run_hi] < a[run_hi - 1]) {}
         std::reverse(a.begin() + lo, a.begin() + run_hi);
-    } else {                 // nondecreasing
-        do { ++run_hi; } while (run_hi < hi && a[run_hi] >= a[run_hi - 1]);
+    } else { // nondecreasing (stable on ties)
+        while (++run_hi < hi && a[run_hi] >= a[run_hi - 1]) {}
     }
     return run_hi - lo;
 }
@@ -325,7 +325,7 @@ static inline void binary_insertion_sort(std::vector<int>& a, int first, int las
         int lo = first, hi = i;
         while (lo < hi) {
             int mid = lo + ((hi - lo) >> 1);
-            if (a[mid] <= x) lo = mid + 1; else hi = mid;  // stable placement (after equals)
+            if (a[mid] <= x) lo = mid + 1; else hi = mid;  // stable
         }
         for (int j = i; j > lo; --j) a[j] = a[j - 1];
         a[lo] = x;
@@ -334,60 +334,55 @@ static inline void binary_insertion_sort(std::vector<int>& a, int first, int las
 
 // Merge when len1 <= len2, adjacent runs: [b1,b1+len1) and [b2,b2+len2)
 static void merge_lo(std::vector<int>& a, int b1, int len1, int b2, int len2) {
-    // Copy left run to tmp
     std::vector<int> tmp(len1);
     std::copy(a.begin() + b1, a.begin() + b1 + len1, tmp.begin());
 
-    int i = 0;           // idx in tmp (left)
-    int j = b2;          // idx in a (right)
-    int k = b1;          // write cursor in a
+    int i = 0;      // tmp (left)
+    int j = b2;     // a   (right)
+    int k = b1;     // dest
 
-    // Standard stable merge forward (no UB with overlap)
     while (i < len1 && j < b2 + len2) {
         if (a[j] < tmp[i]) a[k++] = a[j++];   // right strictly smaller first
         else               a[k++] = tmp[i++]; // left (or equal) to keep stability
     }
-    // Leftovers: if left remains, copy it; if right remains, it's already in place.
     if (i < len1) std::copy(tmp.begin() + i, tmp.end(), a.begin() + k);
+    // if right remains: already in place
 }
 
-// Merge when len1 > len2, adjacent runs
+// Merge when len1 > len2, adjacent runs: merge from the back
 static void merge_hi(std::vector<int>& a, int b1, int len1, int b2, int len2) {
-    // Copy right run to tmp
     std::vector<int> tmp(len2);
     std::copy(a.begin() + b2, a.begin() + b2 + len2, tmp.begin());
 
-    int i = b1 + len1 - 1; // idx in a (left, from end)
-    int j = len2 - 1;      // idx in tmp (right, from end)
-    int k = b2 + len2 - 1; // write cursor in a (from end)
+    int i = b1 + len1 - 1; // left end
+    int j = len2 - 1;      // tmp end
+    int k = b2 + len2 - 1; // dest end
 
-    // Standard stable merge backward
     while (i >= b1 && j >= 0) {
         if (tmp[j] < a[i]) a[k--] = a[i--];
         else               a[k--] = tmp[j--]; // right (or equal) wins to keep stability
     }
-    // Leftovers: if right remains, copy it to the front; if left remains, it's already in place.
-    if (j >= 0) {
-        std::copy(tmp.begin(), tmp.begin() + (j + 1), a.begin() + (k - j));
-    }
+    if (j >= 0) std::copy(tmp.begin(), tmp.begin() + (j + 1), a.begin() + (k - j));
 }
 
-// Merge adjacent runs [base1, base1+len1) and [base2, base2+len2).
-// Includes conservative trimming at the ends to reduce work.
+// Merge adjacent runs [base1, base1+len1) and [base2, base2+len2), with conservative trimming.
+// NOTE: This function trims the *work* but the caller must keep the *original* total length.
 static void merge_at(std::vector<int>& a, int base1, int len1, int base2, int len2) {
     if (len1 == 0 || len2 == 0) return;
 
-    // Trim from left end of left run using upper_bound (stable)
+    // Trim from left end of left run (skip <= first right) — stable
     {
-        int k = int(std::upper_bound(a.begin() + base1, a.begin() + base1 + len1, a[base2])
-                    - (a.begin() + base1));
+        int k = int(std::upper_bound(a.begin() + base1,
+                                     a.begin() + base1 + len1,
+                                     a[base2]) - (a.begin() + base1));
         base1 += k; len1 -= k;
         if (len1 == 0) return;
     }
-    // Trim from right end of right run using lower_bound (stable)
+    // Trim from right end of right run (keep only < last left) — stable
     {
-        int j = int(std::lower_bound(a.begin() + base2, a.begin() + base2 + len2, a[base1 + len1 - 1])
-                    - (a.begin() + base2));
+        int j = int(std::lower_bound(a.begin() + base2,
+                                     a.begin() + base2 + len2,
+                                     a[base1 + len1 - 1]) - (a.begin() + base2));
         len2 = j;
         if (len2 == 0) return;
     }
@@ -396,7 +391,7 @@ static void merge_at(std::vector<int>& a, int base1, int len1, int base2, int le
     else              merge_hi(a, base1, len1, base2, len2);
 }
 
-// TimSort stack invariants (like CPython/Java)
+// TimSort stack invariants (CPython/Java)
 static inline bool collapse_needed(const std::vector<Run>& s) {
     int n = (int)s.size();
     if (n <= 1) return false;
@@ -415,10 +410,18 @@ static inline int pick_merge_idx(const std::vector<Run>& s) {
 }
 
 static void merge_stack_top(std::vector<int>& a, std::vector<Run>& st, int idx) {
-    int base1 = st[idx].base, len1 = st[idx].len;
-    int base2 = st[idx + 1].base, len2 = st[idx + 1].len;
+    int base1 = st[idx].base;
+    int len1  = st[idx].len;
+    int base2 = st[idx + 1].base;
+    int len2  = st[idx + 1].len;
+
+    // DO THE WORK on trimmed subranges…
     merge_at(a, base1, len1, base2, len2);
-    st[idx].len = len1 + len2;
+
+    // …but KEEP the full merged span on the stack:
+    // base stays at original base1; length is the *original* len1+len2.
+    st[idx].len  = st[idx].len + st[idx + 1].len;  // (not the trimmed len1+len2)
+    // st[idx].base unchanged
     st.erase(st.begin() + idx + 1);
 }
 
