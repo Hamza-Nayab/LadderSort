@@ -1,0 +1,14 @@
+Cases todo:
+Uniform random (baseline).
+Already sorted (best-case stability/overhead).
+Reverse sorted (classic worst case).
+Nearly sorted (e.g., 5–10% local swaps or small Gaussian noise).
+K-way interleaved runs (your “round-robin/sharded logs”; vary K to show 𝑂(𝑛log𝐾).
+Riffled two sorted halves (random interleave of two runs).
+Shuffled sorted blocks (few long presorted chunks; vary #blocks).
+High-duplication / low-cardinality (e.g., values mod 1k) to stress partitioning/equality handling.
+
+Cases done:
+Uniform random (baseline).
+Already sorted (best-case stability/overhead).
+Reverse sorted (classic worst case).
