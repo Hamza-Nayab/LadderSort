@@ -56,3 +56,44 @@ static std::vector<int> generate_dataset(size_t N, uint64_t /*seed*/) {
     }
     return out;
 }
+
+static std::vector<int> generate_dataset(size_t N, uint64_t seed) {
+    // Max displacement W (tune as you like: e.g., 16, 32, 64)
+    const size_t W = 32;
+    const size_t BLOCK = W + 1;
+
+    // Start with 1..N
+    std::vector<int> out(N);
+    for (size_t i = 0; i < N; ++i) out[i] = (int)(i + 1);
+
+    // Tiny xorshift64* PRNG (no <random> dependency)
+    uint64_t x = seed ? seed : 0x9E3779B97F4A7C15ULL;
+    auto rnd = [&]() -> uint64_t {
+        x ^= x << 7;  x ^= x >> 9;  x *= 0x2545F4914F6CDD1DULL;
+        return x;
+    };
+
+    // Optional: random phase so block edges don't always align at 0
+    size_t phase = (BLOCK > 1) ? (size_t)(rnd() % BLOCK) : 0;
+
+    // Shuffle each block independently; block size ≤ W+1 ⇒ displacement ≤ W
+    auto shuffle_block = [&](size_t b, size_t e) {
+        // In-place Fisher–Yates on [b, e)
+        for (size_t i = e; i > b + 1; ) {
+            --i;
+            size_t j = b + (size_t)(rnd() % (i - b + 1));
+            std::swap(out[i], out[j]);
+        }
+    };
+
+    // First (possibly short) block to apply the random phase
+    if (phase && phase < N) shuffle_block(0, phase);
+
+    // Full blocks of size BLOCK
+    for (size_t b = phase; b < N; b += BLOCK) {
+        size_t e = std::min(N, b + BLOCK);
+        shuffle_block(b, e);
+    }
+
+    return out;
+}
