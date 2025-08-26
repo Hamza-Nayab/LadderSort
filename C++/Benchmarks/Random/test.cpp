@@ -290,34 +290,34 @@ static void mergesort_with_buf(std::vector<int>& a, std::vector<int>& buf) {
 
 //=========================== Minimal (faithful) Timsort =======================
 //=========================== MIAU TimSort (faithful) =======================
-//=========================== Proper TimSort (fixed, faithful) =================
-//=========================== Proper TimSort (robust & stable) =================
 namespace timsort {
+
+//============================ Canonical, stable TimSort =======================
 
 struct Run { int base; int len; };
 
-// Tim Peters' minrun calculation
+// Tim Peters' minrun
 static inline std::size_t minrun_len(std::size_t n) {
     std::size_t r = 0;
     while (n >= 64) { r |= (n & 1u); n >>= 1u; }
     return n + r; // in [32,64]
 }
 
-// Detect a natural run starting at lo, reverse if descending, return length.
+// Detect natural run at [lo, ..hi) and make it ascending; return its length.
 static int count_run_and_make_ascending(std::vector<int>& a, int lo, int hi) {
     int run_hi = lo + 1;
     if (run_hi >= hi) return 1;
 
-    if (a[run_hi] < a[lo]) { // strictly descending
+    if (a[run_hi] < a[lo]) {                  // strictly descending
         while (++run_hi < hi && a[run_hi] < a[run_hi - 1]) {}
         std::reverse(a.begin() + lo, a.begin() + run_hi);
-    } else { // nondecreasing (stable on ties)
+    } else {                                   // nondecreasing (stable)
         while (++run_hi < hi && a[run_hi] >= a[run_hi - 1]) {}
     }
     return run_hi - lo;
 }
 
-// Stable binary insertion sort on [first,last), assuming [first,start) is sorted.
+// Stable binary insertion sort on [first,last), assuming [first,start) sorted.
 static inline void binary_insertion_sort(std::vector<int>& a, int first, int last, int start) {
     if (first == start) ++start;
     for (int i = start; i < last; ++i) {
@@ -325,73 +325,183 @@ static inline void binary_insertion_sort(std::vector<int>& a, int first, int las
         int lo = first, hi = i;
         while (lo < hi) {
             int mid = lo + ((hi - lo) >> 1);
-            if (a[mid] <= x) lo = mid + 1; else hi = mid;  // stable
+            if (a[mid] <= x) lo = mid + 1; else hi = mid;  // stable: place after equals
         }
         for (int j = i; j > lo; --j) a[j] = a[j - 1];
         a[lo] = x;
     }
 }
 
-// Merge when len1 <= len2, adjacent runs: [b1,b1+len1) and [b2,b2+len2)
-static void merge_lo(std::vector<int>& a, int b1, int len1, int b2, int len2) {
-    std::vector<int> tmp(len1);
-    std::copy(a.begin() + b1, a.begin() + b1 + len1, tmp.begin());
-
-    int i = 0;      // tmp (left)
-    int j = b2;     // a   (right)
-    int k = b1;     // dest
-
-    while (i < len1 && j < b2 + len2) {
-        if (a[j] < tmp[i]) a[k++] = a[j++];   // right strictly smaller first
-        else               a[k++] = tmp[i++]; // left (or equal) to keep stability
+// --------- Galloping helpers (half-open [base, base+len)) --------------------
+static inline int gallop_left(int key, const std::vector<int>& a, int base, int len) {
+    // first i with a[i] >= key
+    if (len <= 0) return base;
+    int last_ofs = 0, ofs = 1;
+    if (key > a[base]) {
+        const int max_ofs = len;
+        while (ofs < max_ofs && key > a[base + ofs]) { last_ofs = ofs; ofs = (ofs << 1) + 1; }
+        if (ofs > max_ofs) ofs = max_ofs;
+        int lo = base + last_ofs + 1, hi = base + ofs;
+        while (lo < hi) { int mid = lo + ((hi - lo) >> 1); if (key > a[mid]) lo = mid + 1; else hi = mid; }
+        return lo;
     }
-    if (i < len1) std::copy(tmp.begin() + i, tmp.end(), a.begin() + k);
-    // if right remains: already in place
+    return base;
 }
 
-// Merge when len1 > len2, adjacent runs: merge from the back
-static void merge_hi(std::vector<int>& a, int b1, int len1, int b2, int len2) {
-    std::vector<int> tmp(len2);
-    std::copy(a.begin() + b2, a.begin() + b2 + len2, tmp.begin());
-
-    int i = b1 + len1 - 1; // left end
-    int j = len2 - 1;      // tmp end
-    int k = b2 + len2 - 1; // dest end
-
-    while (i >= b1 && j >= 0) {
-        if (tmp[j] < a[i]) a[k--] = a[i--];
-        else               a[k--] = tmp[j--]; // right (or equal) wins to keep stability
-    }
-    if (j >= 0) std::copy(tmp.begin(), tmp.begin() + (j + 1), a.begin() + (k - j));
+static inline int gallop_right(int key, const std::vector<int>& a, int base, int len) {
+    // first i with a[i] > key
+    if (len <= 0) return base;
+    if (key < a[base]) return base;
+    int last_ofs = 0, ofs = 1;
+    const int max_ofs = len;
+    while (ofs < max_ofs && key >= a[base + ofs]) { last_ofs = ofs; ofs = (ofs << 1) + 1; }
+    if (ofs > max_ofs) ofs = max_ofs;
+    int lo = base + last_ofs + 1, hi = base + ofs;
+    while (lo < hi) { int mid = lo + ((hi - lo) >> 1); if (key >= a[mid]) lo = mid + 1; else hi = mid; }
+    return lo;
 }
 
-// Merge adjacent runs [base1, base1+len1) and [base2, base2+len2), with conservative trimming.
-// NOTE: This function trims the *work* but the caller must keep the *original* total length.
-static void merge_at(std::vector<int>& a, int base1, int len1, int base2, int len2) {
-    if (len1 == 0 || len2 == 0) return;
-
-    // Trim from left end of left run (skip <= first right) — stable
-    {
-        int k = int(std::upper_bound(a.begin() + base1,
-                                     a.begin() + base1 + len1,
-                                     a[base2]) - (a.begin() + base1));
-        base1 += k; len1 -= k;
-        if (len1 == 0) return;
-    }
-    // Trim from right end of right run (keep only < last left) — stable
-    {
-        int j = int(std::lower_bound(a.begin() + base2,
-                                     a.begin() + base2 + len2,
-                                     a[base1 + len1 - 1]) - (a.begin() + base2));
-        len2 = j;
-        if (len2 == 0) return;
-    }
-
-    if (len1 <= len2) merge_lo(a, base1, len1, base2, len2);
-    else              merge_hi(a, base1, len1, base2, len2);
+static inline void ensure_buf(std::vector<int>& buf, int need) {
+    if ((int)buf.size() < need) buf.resize(need);
 }
 
-// TimSort stack invariants (CPython/Java)
+// --------------------------- Merging with galloping --------------------------
+static void merge_lo(std::vector<int>& a, int b1, int len1, int b2, int len2,
+                     std::vector<int>& buf, int& min_gallop)
+{
+    // pre: len1 <= len2, b2 == b1 + len1
+    ensure_buf(buf, len1);
+    std::copy(a.begin() + b1, a.begin() + b1 + len1, buf.begin());
+
+    int i = 0;           // in buf (left run)
+    int j = b2;          // in a   (right run)
+    int k = b1;          // dest in a
+
+    // Warm-up (as in Tim's)
+    a[k++] = a[j++]; --len2;
+    if (len2 == 0) { std::copy(buf.begin() + i, buf.begin() + i + len1, a.begin() + k); return; }
+    if (len1 == 1) { std::copy(a.begin() + j, a.begin() + j + len2, a.begin() + k); a[k + len2] = buf[i]; return; }
+
+    int mg = min_gallop;
+    while (true) {
+        int winL = 0, winR = 0;
+
+        // Straight merge until one side wins mg times
+        do {
+            if (a[j] < buf[i]) { a[k++] = a[j++]; --len2; ++winR; winL = 0; if (len2 == 0) goto done; }
+            else               { a[k++] = buf[i++]; --len1; ++winL; winR = 0; if (len1 == 0) goto done; }
+        } while ((winL | winR) < mg);
+
+        // Gallop mode
+        int g1, g2;
+        do {
+            // in merge_lo:
+g1 = gallop_right(a[j], buf, i, /*was: len1*/ len1 - i) - i;  // search only the remaining left part
+    // # from left <= a[j]
+            if (g1) {
+                std::copy(buf.begin() + i, buf.begin() + i + g1, a.begin() + k);
+                k += g1; i += g1; len1 -= g1;
+                if (len1 == 0) goto done;
+            }
+            a[k++] = a[j++]; --len2;
+            if (len2 == 0) goto done;
+
+            g2 = gallop_left(buf[i], a, j, len2) - j;      // # from right < buf[i]
+            if (g2) {
+                std::copy(a.begin() + j, a.begin() + j + g2, a.begin() + k);
+                k += g2; j += g2; len2 -= g2;
+                if (len2 == 0) goto done;
+            }
+            a[k++] = buf[i++]; --len1;
+            if (len1 == 0) goto done;
+
+            --mg;
+        } while (g1 >= 7 || g2 >= 7);
+        mg += 2;
+    }
+done:
+    min_gallop = (mg < 1) ? 1 : mg;
+    if (len1 > 0) std::copy(buf.begin() + i, buf.begin() + i + len1, a.begin() + k);
+    // if len2 > 0: already in place
+}
+
+static void merge_hi(std::vector<int>& a, int b1, int len1, int b2, int len2,
+                     std::vector<int>& buf, int& min_gallop)
+{
+    // pre: len1 > len2, b2 == b1 + len1
+    ensure_buf(buf, len2);
+    std::copy(a.begin() + b2, a.begin() + b2 + len2, buf.begin());
+
+    int i = b1 + len1 - 1;  // end of left
+    int j = len2 - 1;       // end of buf (right)
+    int k = b2 + len2 - 1;  // end of merged
+
+    // Warm-up
+    a[k--] = a[i--]; --len1;
+    if (len1 == 0) { std::copy(buf.begin(), buf.begin() + (j + 1), a.begin() + (k - j)); return; }
+    if (len2 == 1) {
+        k -= len1; i -= len1;
+        std::copy(a.begin() + i + 1, a.begin() + i + 1 + len1, a.begin() + k + 1);
+        a[k] = buf[j];
+        return;
+    }
+
+    int mg = min_gallop;
+    while (true) {
+        int winL = 0, winR = 0;
+
+        // Straight merge (from the back)
+        do {
+            if (buf[j] < a[i]) { a[k--] = a[i--]; --len1; ++winL; winR = 0; if (len1 == 0) goto done; }
+            else               { a[k--] = buf[j--]; --len2; ++winR; winL = 0; if (len2 == 0) goto done; }
+        } while ((winL | winR) < mg);
+
+        // Gallop mode (backwards)
+        int g1, g2;
+        do {
+            // move block from left: count elems > buf[j]
+            {
+                int idx = gallop_right(buf[j], a, b1, len1);   // first > buf[j]
+                g1 = (b1 + len1) - idx;                        // count of left > buf[j]
+                if (g1) {
+                    k   -= g1;
+                    i   -= g1;
+                    len1 -= g1;
+                    std::copy_backward(a.begin() + idx, a.begin() + idx + g1, a.begin() + k + 1);
+                    if (len1 == 0) goto done;
+                }
+            }
+            // move one from right
+            a[k--] = buf[j--]; --len2;
+            if (len2 == 0) goto done;
+
+            // move block from right: count elems >= a[i]
+            {
+                int jpos = gallop_left(a[i], buf, 0, len2);    // first >= a[i]
+                g2 = len2 - jpos;                               // count of right >= a[i]
+                if (g2) {
+                    k -= g2;
+                    std::copy(buf.begin() + jpos, buf.begin() + jpos + g2, a.begin() + k + 1);
+                    j = jpos - 1;
+                    len2 -= g2;
+                    if (len2 == 0) goto done;
+                }
+            }
+            // move one from left
+            a[k--] = a[i--]; --len1;
+            if (len1 == 0) goto done;
+
+            --mg;
+        } while (g1 >= 7 || g2 >= 7);
+        mg += 2;
+    }
+done:
+    min_gallop = (mg < 1) ? 1 : mg;
+    if (len2 > 0) std::copy(buf.begin(), buf.begin() + (j + 1), a.begin() + (k - j));
+    // if len1 > 0: left remainder already in place
+}
+
+// ----------------------- Run stack & invariants (CPython/Java) ---------------
 static inline bool collapse_needed(const std::vector<Run>& s) {
     int n = (int)s.size();
     if (n <= 1) return false;
@@ -399,7 +509,6 @@ static inline bool collapse_needed(const std::vector<Run>& s) {
     int A = s[n - 3].len, B = s[n - 2].len, C = s[n - 1].len;
     return (A <= B + C) || (B <= C);
 }
-
 static inline int pick_merge_idx(const std::vector<Run>& s) {
     int n = (int)s.size();
     if (n >= 3) {
@@ -409,57 +518,70 @@ static inline int pick_merge_idx(const std::vector<Run>& s) {
     return n - 2;
 }
 
-static void merge_stack_top(std::vector<int>& a, std::vector<Run>& st, int idx) {
-    int base1 = st[idx].base;
-    int len1  = st[idx].len;
-    int base2 = st[idx + 1].base;
-    int len2  = st[idx + 1].len;
+static void merge_stack_top(std::vector<int>& a, std::vector<Run>& st,
+                            int idx, std::vector<int>& buf, int& min_gallop)
+{
+    int b1 = st[idx].base;
+    int l1 = st[idx].len;
+    int b2 = st[idx + 1].base;
+    int l2 = st[idx + 1].len;
 
-    // DO THE WORK on trimmed subranges…
-    merge_at(a, base1, len1, base2, len2);
+    // adjacent by construction
+    if (l1 <= l2) merge_lo(a, b1, l1, b2, l2, buf, min_gallop);
+    else          merge_hi(a, b1, l1, b2, l2, buf, min_gallop);
 
-    // …but KEEP the full merged span on the stack:
-    // base stays at original base1; length is the *original* len1+len2.
-    st[idx].len  = st[idx].len + st[idx + 1].len;  // (not the trimmed len1+len2)
-    // st[idx].base unchanged
+    // keep original full span on the stack
+    st[idx].len = l1 + l2;
     st.erase(st.begin() + idx + 1);
 }
 
-static void merge_collapse(std::vector<int>& a, std::vector<Run>& st) {
+static void merge_collapse(std::vector<int>& a, std::vector<Run>& st,
+                           std::vector<int>& buf, int& min_gallop)
+{
     while (collapse_needed(st)) {
         int i = pick_merge_idx(st);
-        merge_stack_top(a, st, i);
+        merge_stack_top(a, st, i, buf, min_gallop);
     }
 }
 
-static void merge_force_collapse(std::vector<int>& a, std::vector<Run>& st) {
+static void merge_force_collapse(std::vector<int>& a, std::vector<Run>& st,
+                                 std::vector<int>& buf, int& min_gallop)
+{
     while (st.size() > 1) {
         int n = (int)st.size();
         int i = (n >= 3 && st[n - 3].len < st[n - 1].len) ? (n - 3) : (n - 2);
-        merge_stack_top(a, st, i);
+        merge_stack_top(a, st, i, buf, min_gallop);
     }
 }
 
-static void timsort(std::vector<int>& a) {
+// ---------------------------------- APIs -------------------------------------
+static void timsort_with_buf(std::vector<int>& a, std::vector<int>& buf) {
     const int n = (int)a.size();
     if (n < 2) return;
 
     const int minrun = (int)minrun_len((std::size_t)n);
     std::vector<Run> st; st.reserve((n + minrun - 1) / minrun);
 
+    int min_gallop = 7;  // Tim’s adaptive threshold
+
     int lo = 0;
     while (lo < n) {
         int run_len = count_run_and_make_ascending(a, lo, n);
-        int need = (run_len < minrun) ? std::min(minrun, n - lo) : run_len;
+        int need    = (run_len < minrun) ? std::min(minrun, n - lo) : run_len;
         binary_insertion_sort(a, lo, lo + need, lo + run_len); // extend to minrun
         st.push_back({lo, need});
         lo += need;
-        merge_collapse(a, st);
+        merge_collapse(a, st, buf, min_gallop);
     }
-    merge_force_collapse(a, st);
+    merge_force_collapse(a, st, buf, min_gallop);
 }
 
-// Iterator overload: sort into a temp then move back (keeps API identical)
+static void timsort(std::vector<int>& a) {
+    std::vector<int> buf;      // local reusable buffer for this sort
+    timsort_with_buf(a, buf);
+}
+
+// Optional iterator overload
 template<class RandomIt>
 void timsort(RandomIt first, RandomIt last) {
     using T = typename std::iterator_traits<RandomIt>::value_type;
