@@ -297,37 +297,37 @@ inline void timsort(std::vector<int>& a) { gfx::timsort(a.begin(), a.end()); }
 
 
 // Uniform random integers (i.i.d., duplicates allowed)
+// Fixed-stride (pure round-robin) interleave with small W.
+// Choose W (e.g., 8, 16, or 32). The seed is unused (kept to match your signature).
+// Block-cyclic interleave of K small sorted runs with tiny block size B.
+// Good LadderSort case: index moves mostly ±1 as blocks switch.
 static std::vector<int> generate_dataset(size_t N, uint64_t /*seed*/) {
-    // K-way round-robin interleaving of strictly increasing runs (K = 64)
-    const int K = 32;
-    std::vector<int> out;
-    out.reserve(N);
+    const int    K = 8;   // small number of runs (e.g., >8)
+    const size_t B = 4;    // tiny block size (e.g., >4)
 
-    const size_t chunk = N / K;                 // length of the first K-1 runs
-    const size_t last_size = N - chunk * (K-1); // length of the last run (>= chunk)
+    std::vector<int> out; out.reserve(N);
 
-    auto run_size = [&](int k) -> size_t {
-        return (k == K - 1) ? last_size : chunk;
-    };
-    auto run_base = [&](int k) -> size_t {
-        // values are 1..N spread across runs; run k starts at 1 + k*chunk
-        return 1 + static_cast<size_t>(k) * chunk;
-    };
-
-    // Interleave by rows: S[0][0], S[1][0], ..., S[K-1][0], then S[0][1], ...
-    // Note: exactly mirrors your earlier loop: for (i < chunk + 1) ...
-    for (size_t i = 0; i < chunk + 1; ++i) {
-        for (int k = 0; k < K; ++k) {
-            if (i < run_size(k)) {
-                out.push_back(static_cast<int>(run_base(k) + i));
-            }
-        }
+    // Partition 1..N into K disjoint increasing runs (nearly equal lengths).
+    std::vector<size_t> cur(K), stop(K); // stop is inclusive
+    size_t q = N / K, r = N % K, acc = 0;
+    for (int k = 0; k < K; ++k) {
+        size_t len = q + (k < (int)r ? 1 : 0);
+        cur[k]  = acc + 1;
+        stop[k] = acc + len;   // inclusive
+        acc    += len;
     }
 
-    // If N is a multiple of 64 (your benchmarks: 1e6, 1e7, 1e8), out.size() == N.
-    // For other N, this matches your exact construction (which may leave out some tail
-    // of the last run if N % 64 > 1).
-
+    // Emit blocks of size B from each run in cyclic order.
+    size_t produced = 0;
+    int k = 0;
+    while (produced < N) {
+        if (cur[k] <= stop[k]) {
+            size_t take = std::min(B, stop[k] - cur[k] + 1);
+            for (size_t t = 0; t < take; ++t) out.push_back((int)cur[k]++);
+            produced += take;
+        }
+        k = (k + 1) % K; // next run
+    }
     return out;
 }
 

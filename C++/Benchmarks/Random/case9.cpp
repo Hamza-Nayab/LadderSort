@@ -1,6 +1,7 @@
 // g++ -O3 -std=c++17 -march=native bench_postinsert_multi.cpp -o bench_postinsert_multi
 #include <algorithm>
 #include <chrono>
+#include <gfx/timsort.hpp>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
@@ -12,7 +13,6 @@
 #include <vector>
 #include <climits>
 #include <iterator>
-#include <functional>
 
 using std::size_t;
 
@@ -30,28 +30,55 @@ static std::vector<int>              g_tops_ws;  // run tails
 static std::vector<int>              g_ladder_out_ws; // output buffer
 
 //------------------------ Hinted search over flat `tops` ----------------------
+// Hinted lower_bound with exponential "gallop" around the hint.
+// Fast when the index moves slowly (your best cases), but still O(log K)
+// on random inputs.
 inline int hinted_lower_bound_lad(const std::vector<int>& tops, int x, int last_idx_hint) {
     int n = (int)tops.size();
     if (n == 0) return 0;
-    int idx = last_idx_hint;
-    if (idx < 0) idx = 0;
-    if (idx >= n) idx = n - 1;
 
-    if (tops[idx] > x) {
-        while (idx + 1 < n && tops[idx + 1] > x) ++idx; // move right
-    } else {
-        while (idx > 0 && tops[idx - 1] <= x) --idx;     // move left
-    }
-    // Validate; else fallback to binary search
-    if (!((idx == 0 || tops[idx - 1] > x) && tops[idx] <= x)) {
-        int low = 0, high = n;
-        while (low < high) {
-            int mid = (low + high) / 2;
-            if (tops[mid] > x) low = mid + 1; else high = mid;
+    // Clamp the hint
+    int i = last_idx_hint;
+    if (i < 0) i = 0;
+    if (i >= n) i = n - 1;
+
+    // If the hint is already correct, use it.
+    if ((i == 0 || tops[i - 1] > x) && tops[i] <= x) return i;
+
+    int lo, hi;
+
+    if (tops[i] > x) {
+        // Need a larger index -> gallop to the right
+        lo = i + 1;
+        hi = lo;
+        int step = 1;
+        while (hi < n && tops[hi] > x) {
+            lo = hi;
+            hi = lo + step;
+            step <<= 1;
         }
-        idx = low;
+        if (hi > n) hi = n;
+    } else {
+        // Need a smaller index -> gallop to the left
+        hi = i + 1;
+        lo = i;
+        int step = 1;
+        while (lo > 0 && tops[lo - 1] <= x) {
+            hi = lo;
+            lo -= step;
+            if (lo < 0) { lo = 0; break; }
+            step <<= 1;
+        }
+        if (lo < 0) lo = 0;
     }
-    return idx;
+
+    // Finish with binary search in the narrowed window [lo, hi)
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (tops[mid] > x) lo = mid + 1;
+        else               hi = mid;
+    }
+    return lo;
 }
 
 //======================== Merge primitives (for LadderSort) ===================
@@ -96,7 +123,7 @@ static void merge_two_gallop(const std::vector<int>& A, const std::vector<int>& 
     if (j < B.size()) out.insert(out.end(), B.begin()+j, B.end());
 }
 
-// Loser-tree for k-way merge (k >= 3)
+//=========================== FIXED Loser-tree for k-way merge =================
 struct LoserTree {
     int k;
     std::vector<int> tree;                // losers; size k
@@ -116,28 +143,39 @@ struct LoserTree {
         }
         for (int i = 0; i < k; ++i) adjust(i);
     }
-
-    inline void adjust(int s) {
-        int t = s;
-        for (int parent = (s + k) >> 1; parent > 0; parent >>= 1) {
-            int& loser = tree[parent - 1];
-            if (loser < 0 || key[t] >= key[loser]) std::swap(t, loser);
+// --- REPLACE your LoserTree::adjust with this ---
+inline void adjust(int s) {
+    int t = s; // current winner candidate (valid index)
+    for (int parent = (s + k) >> 1; parent > 0; parent >>= 1) {
+        int& l = tree[parent - 1];   // stores the loser at this node
+        if (l < 0) {
+            // empty slot: just place current competitor here; keep bubbling the same winner 't'
+            l = t;
+        } else if (key[t] >= key[l]) {
+            // 't' loses (>= to keep stability on ties), store loser and keep bubbling the winner
+            std::swap(t, l);
         }
-        tree[0] = t; // winner at root
+        // else: t < l  -> 'l' loses and is already stored; keep 't' as winner bubbling up
     }
+    tree[0] = t; // final winner index (never -1)
+}
 
-    inline int pop_and_advance() {
-        int s = tree[0];
-        int v = key[s];
-        if (++cur[s] < end[s]) key[s] = *cur[s]; else key[s] = INT_MAX;
-        adjust(s);
-        return v;
-    }
+inline int pop_and_advance() {
+    int s = tree[0];
+    if (s < 0) return INT_MAX; // defensive guard
+    int v = key[s];
+    if (++cur[s] < end[s]) key[s] = *cur[s]; else key[s] = INT_MAX;
+    adjust(s);
+    return v;
+}
 };
 
 static void merge_k_loser_tree(const std::vector<std::vector<int>>& runs, std::vector<int>& out) {
+    out.clear();
     size_t total = 0; for (const auto& r : runs) total += r.size();
-    out.clear(); out.reserve(total);
+    out.reserve(total);
+    if (runs.empty()) return;
+    if (runs.size() == 1) { out = runs[0]; return; }
     LoserTree lt(runs);
     for (size_t t = 0; t < total; ++t) out.push_back(lt.pop_and_advance());
 }
@@ -226,7 +264,6 @@ static void quicksort3(std::vector<int>& a) {
 //=========================== Merge sort (stable, top-down) ====================
 static void mergesort_rec(std::vector<int>& a, std::vector<int>& buf, int l, int r) {
     if (r - l <= 32) {
-        // (binary) insertion sort base case
         for (int i = l + 1; i <= r; ++i) {
             int x = a[i], j = i - 1;
             while (j >= l && a[j] > x) { a[j + 1] = a[j]; --j; }
@@ -238,7 +275,6 @@ static void mergesort_rec(std::vector<int>& a, std::vector<int>& buf, int l, int
     mergesort_rec(a, buf, l, m);
     mergesort_rec(a, buf, m + 1, r);
 
-    // No early-out here; always merge
     int i = l, j = m + 1, k = l;
     while (i <= m && j <= r) buf[k++] = (a[i] <= a[j]) ? a[i++] : a[j++];
     while (i <= m) buf[k++] = a[i++];
@@ -254,173 +290,42 @@ static void mergesort_with_buf(std::vector<int>& a, std::vector<int>& buf) {
 }
 
 //=========================== Minimal (faithful) Timsort =======================
-// - Stable
-// - Natural run detection + reversal
-// - Dynamic minrun computation
-// - Run stack + invariants (Tim Peters)
-// - Merges use a temporary buffer for the smaller run (no fancy gallop to keep minimality)
-//   (Still performs very well on near-sorted data.)
-namespace tiny_timsort {
-
-struct Run { int base; int len; };
-
-static inline std::size_t minrun_len(std::size_t n) {
-    std::size_t r = 0;
-    while (n >= 64) { r |= (n & 1u); n >>= 1u; }
-    return n + r; // in [32,64]
+//=========================== MIAU TimSort (faithful) =======================
+namespace timsort {
+inline void timsort(std::vector<int>& a) { gfx::timsort(a.begin(), a.end()); }
 }
 
-// Detect a natural run starting at 'lo' (exclusive hi), make ascending; return length
-static int count_run_and_make_ascending(std::vector<int>& a, int lo, int hi) {
-    int run_hi = lo + 1;
-    if (run_hi >= hi) return 1;
 
-    // Descending?
-    if (a[run_hi++] < a[lo]) {
-        while (run_hi < hi && a[run_hi] < a[run_hi - 1]) ++run_hi;
-        std::reverse(a.begin() + lo, a.begin() + run_hi);
-    } else {
-        while (run_hi < hi && a[run_hi] >= a[run_hi - 1]) ++run_hi;
+// Uniform random integers (i.i.d., duplicates allowed)
+static std::vector<int> generate_dataset(size_t N, uint64_t seed) {
+    // Two sorted halves:
+    //   A: 1 .. nA
+    //   B: nA+1 .. N
+    const size_t nA = N / 2;
+    const size_t nB = N - nA;
+
+    std::vector<int> out;
+    out.reserve(N);
+
+    // tiny xorshift64* PRNG (same style as before)
+    uint64_t x = seed ? seed : 0x9E3779B97F4A7C15ULL;
+    auto rnd = [&]() -> uint64_t {
+        x ^= x << 7;  x ^= x >> 9;  x *= 0x2545F4914F6CDD1DULL;
+        return x;
+    };
+
+    size_t i = 0, j = 0;  // cursors into A and B
+    while (i < nA || j < nB) {
+        bool takeA;
+        if (i == nA)        takeA = false;        // A exhausted -> take from B
+        else if (j == nB)   takeA = true;         // B exhausted -> take from A
+        else                takeA = (rnd() & 1ULL); // fair coin
+
+        if (takeA) out.push_back(int(1 + i++));
+        else       out.push_back(int(1 + nA + j++));
     }
-    return run_hi - lo;
+    return out;
 }
-
-// Binary insertion sort on [first,last), starting at 'start' (stable)
-static inline void binary_insertion_sort(std::vector<int>& a, int first, int last, int start) {
-    if (first == start) ++start;
-    for (int i = start; i < last; ++i) {
-        int x = a[i];
-        int lo = first, hi = i;
-        while (lo < hi) {
-            int mid = lo + ((hi - lo) >> 1);
-            if (a[mid] <= x) lo = mid + 1; else hi = mid; // stable: equals to the right
-        }
-        for (int j = i; j > lo; --j) a[j] = a[j-1];
-        a[lo] = x;
-    }
-}
-
-// Merge helpers: choose smaller side to buffer for stability & cache friendliness
-static void merge_lo(std::vector<int>& a, int base1, int len1, int base2, int len2) {
-    std::vector<int> tmp(len1);
-    std::copy(a.begin() + base1, a.begin() + base1 + len1, tmp.begin());
-
-    int i = 0;            // in tmp
-    int j = base2;        // in a
-    int dest = base1;     // in a
-
-    while (i < len1 && j < base2 + len2) {
-        if (a[j] < tmp[i]) a[dest++] = a[j++];
-        else               a[dest++] = tmp[i++];
-    }
-    // copy remainder
-    if (i < len1) std::copy(tmp.begin() + i, tmp.end(), a.begin() + dest);
-    // right remainder already in place
-}
-
-static void merge_hi(std::vector<int>& a, int base1, int len1, int base2, int len2) {
-    std::vector<int> tmp(len2);
-    std::copy(a.begin() + base2, a.begin() + base2 + len2, tmp.begin());
-
-    int i = base1 + len1 - 1; // in a
-    int j = len2 - 1;         // in tmp
-    int dest = base2 + len2 - 1;
-
-    while (i >= base1 && j >= 0) {
-        if (tmp[j] < a[i]) a[dest--] = a[i--];
-        else               a[dest--] = tmp[j--];
-    }
-    if (j >= 0) {
-        // move remaining tmp to front
-        std::copy(tmp.begin(), tmp.begin() + (j + 1), a.begin() + base1);
-    }
-}
-
-static void merge_at(std::vector<int>& a, int base1, int len1, int base2, int len2) {
-    // pre-trim via binary gallop at the borders to avoid work (optional but cheap)
-    // trim left run's head against first of right run
-    int k = (int)(std::upper_bound(a.begin() + base1, a.begin() + base1 + len1, a[base2]) - (a.begin() + base1));
-    base1 += k; len1 -= k;
-    if (len1 == 0) return; // already ordered
-    // trim right run's tail against last of left run
-    int j = (int)(std::lower_bound(a.begin() + base2, a.begin() + base2 + len2, a[base1 + len1 - 1]) - (a.begin() + base2));
-    len2 = j;
-    if (len2 == 0) return;
-
-    if (len1 <= len2) merge_lo(a, base1, len1, base2, len2);
-    else              merge_hi(a, base1, len1, base2, len2);
-}
-
-static inline bool collapse_needed(const std::vector<Run>& s) {
-    int n = (int)s.size();
-    if (n <= 1) return false;
-    if (n == 2) return s[0].len <= s[1].len;
-    int A = s[n-3].len, B = s[n-2].len, C = s[n-1].len;
-    return (A <= B + C) || (B <= C);
-}
-
-static inline int pick_merge_idx(const std::vector<Run>& s) {
-    int n = (int)s.size();
-    if (n >= 3) {
-        int A = s[n-3].len, C = s[n-1].len;
-        return (A < C) ? (n - 3) : (n - 2);
-    }
-    return n - 2;
-}
-
-static void merge_stack_top(std::vector<int>& a, std::vector<Run>& st, int idx) {
-    int base1 = st[idx].base, len1 = st[idx].len;
-    int base2 = st[idx+1].base, len2 = st[idx+1].len;
-    merge_at(a, base1, len1, base2, len2);
-    st[idx].len = len1 + len2;
-    st.erase(st.begin() + idx + 1);
-}
-
-static void merge_collapse(std::vector<int>& a, std::vector<Run>& st) {
-    while (collapse_needed(st)) {
-        int i = pick_merge_idx(st);
-        merge_stack_top(a, st, i);
-    }
-}
-
-static void merge_force_collapse(std::vector<int>& a, std::vector<Run>& st) {
-    while (st.size() > 1) {
-        int n = (int)st.size();
-        int i = (n >= 3 && st[n-3].len < st[n-1].len) ? (n - 3) : (n - 2);
-        merge_stack_top(a, st, i);
-    }
-}
-
-// Public API for vector<int>. Minimal to match this benchmark.
-static void timsort(std::vector<int>& a) {
-    const int n = (int)a.size();
-    if (n < 2) return;
-
-    const int minrun = (int)minrun_len((std::size_t)n);
-    std::vector<Run> st; st.reserve((n + minrun - 1) / minrun);
-
-    int lo = 0;
-    while (lo < n) {
-        int run_len = count_run_and_make_ascending(a, lo, n);
-        int need = (run_len < minrun) ? std::min(minrun, n - lo) : run_len;
-        binary_insertion_sort(a, lo, lo + need, lo + run_len);
-        st.push_back({lo, need});
-        lo += need;
-        merge_collapse(a, st);
-    }
-    merge_force_collapse(a, st);
-}
-
-// Generic iterator overload (kept for convenience)
-template<class RandomIt>
-void timsort(RandomIt first, RandomIt last) {
-    using T = typename std::iterator_traits<RandomIt>::value_type;
-    std::vector<T> tmp(first, last);
-    timsort(tmp);
-    std::move(tmp.begin(), tmp.end(), first);
-}
-
-} // namespace tiny_timsort
 
 //=========================== Benchmark harness (time only) ====================
 struct Result {
@@ -432,7 +337,7 @@ struct Result {
 
 template<typename Fn>
 static Result bench_algo_postinsert(const std::string& name,
-                                    const std::vector<int>& sorted_base, // size n
+                                    const std::vector<int>& base, // size n (not necessarily sorted)
                                     int rounds,
                                     Fn fn)
 {
@@ -440,7 +345,7 @@ static Result bench_algo_postinsert(const std::string& name,
 
     // Warm-up (not timed): copy base, then push_back(-1)
     {
-        std::vector<int> v = sorted_base;
+        std::vector<int> v = base;
         v.push_back(-1);
         fn(v);
         consume(v);
@@ -448,7 +353,7 @@ static Result bench_algo_postinsert(const std::string& name,
 
     std::vector<double> times; times.reserve(rounds);
     for (int r = 0; r < rounds; ++r) {
-        std::vector<int> v = sorted_base;
+        std::vector<int> v = base;
         v.push_back(-1); // post-insert smaller element at the end
         auto t0 = std::chrono::steady_clock::now();
         fn(v);
@@ -496,55 +401,35 @@ int main() {
         const size_t n = C.n;
         const int rounds = C.rounds;
 
-        // Data generation.
-        // Riffle two sorted halves by coin-flip (no extra headers)
-size_t L = n / 2, R = n - L;
-std::vector<int> A(L), B(R);
-std::iota(A.begin(), A.end(), 1);
-std::iota(B.begin(), B.end(), (int)L + 1);
+        // Base dataset: Strided-by-K (K=64) then post-insert -1 per trial
+        std::vector<int> base = generate_dataset(n, 0xC0FFEEULL);
 
-// xorshift64* RNG for unbiased coin flips (deterministic seed)
-auto rng = [x = 0xC0FFEEULL]() mutable -> uint64_t {
-    x ^= x >> 12; x ^= x << 25; x ^= x >> 27; return x * 2685821657736338717ULL;
-};
-auto coin = [&](){ return (rng() >> 63) & 1; };
-
-std::vector<int> sorted_base; 
-sorted_base.reserve(n);
-size_t i = 0, j = 0;
-while (i < L || j < R) {
-    bool takeA = (j == R) || (i < L && (coin() || j == R));
-    if (takeA) sorted_base.push_back(A[i++]);
-    else       sorted_base.push_back(B[j++]);
-}
-
-
-        std::cout << "\n=== Post-insert case (sorted + push_back(-1)), n=" << n
+        std::cout << "\n=== Post-insert case (Strided-by-64 + push_back(-1)), n=" << n
                   << ", rounds=" << rounds << " ===\n\n";
 
-        auto r_ladder = bench_algo_postinsert("LadderSort", sorted_base, rounds, [](std::vector<int>& v){
-            ladder_sort_into(v, g_ladder_out_ws); // write into reusable out buffer
-            v.swap(g_ladder_out_ws);              // deliver result in-place
+        auto r_ladder = bench_algo_postinsert("LadderSort", base, rounds, [](std::vector<int>& v){
+            ladder_sort_into(v, g_ladder_out_ws);
+            v.swap(g_ladder_out_ws);
         });
 
-        auto r_tims = bench_algo_postinsert("Timsort", sorted_base, rounds, [&](std::vector<int>& v){
-            tiny_timsort::timsort(v);             // stable Timsort (integrated)
+        auto r_tims = bench_algo_postinsert("Timsort", base, rounds, [&](std::vector<int>& v){
+            timsort::timsort(v);
         });
 
-        auto r_quick = bench_algo_postinsert("Quicksort", sorted_base, rounds, [](std::vector<int>& v){
-            quicksort3(v);                         // adaptive pivot; in-place
+        auto r_quick = bench_algo_postinsert("Quicksort", base, rounds, [](std::vector<int>& v){
+            quicksort3(v);
         });
 
-        auto r_intro = bench_algo_postinsert("Introsort", sorted_base, rounds, [](std::vector<int>& v){
-            std::sort(v.begin(), v.end());         // in-place
+        auto r_intro = bench_algo_postinsert("Introsort", base, rounds, [](std::vector<int>& v){
+            std::sort(v.begin(), v.end());
         });
 
-        auto r_stable = bench_algo_postinsert("StableSort", sorted_base, rounds, [](std::vector<int>& v){
-            std::stable_sort(v.begin(), v.end());  // library allocs counted
+        auto r_stable = bench_algo_postinsert("StableSort", base, rounds, [](std::vector<int>& v){
+            std::stable_sort(v.begin(), v.end());
         });
 
-        auto r_merge = bench_algo_postinsert("MergeSort", sorted_base, rounds, [&](std::vector<int>& v){
-            mergesort_with_buf(v, g_merge_buf);    // reusable buf
+        auto r_merge = bench_algo_postinsert("MergeSort", base, rounds, [&](std::vector<int>& v){
+            mergesort_with_buf(v, g_merge_buf);
         });
 
         std::cout << "Results (Post-insert only):\n";
@@ -559,4 +444,3 @@ while (i < L || j < R) {
     if (g_sink64 == 0xdeadbeefULL) std::cerr << "";
     return 0;
 }
- 

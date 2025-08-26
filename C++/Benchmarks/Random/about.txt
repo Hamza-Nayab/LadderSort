@@ -9,7 +9,7 @@ Case 7 = 10 unique elements at the end.
 
 Best Cases:
 1:
-og/event compaction from Kafka (or sharded logs): each partition is time-sorted, a consumer reads partitions round-robin into one file, then you need a global time sort.
+log/event compaction from Kafka (or sharded logs): each partition is time-sorted, a consumer reads partitions round-robin into one file, then you need a global time sort.
 
 Multi-sensor/time-series fusion: each sensor stream is monotone in time; a recorder multiplexes samples round-robin; later you sort by timestamp.
 

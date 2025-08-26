@@ -417,7 +417,6 @@ void timsort(RandomIt first, RandomIt last) {
 static std::vector<int> generate_dataset(size_t N, uint64_t seed) {
     const int K = 32;       // small number of streams (tweak 8..64)
     const int BURST_MAX = 16; // burst length upper bound (1..BURST_MAX)
-
     std::vector<int> out; out.reserve(N);
 
     // Each stream k gets a disjoint increasing range [next[k], end[k]]
