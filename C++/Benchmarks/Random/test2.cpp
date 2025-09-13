@@ -302,17 +302,78 @@ inline void timsort(std::vector<int>& a) { gfx::timsort(a.begin(), a.end()); }
 }
 
 //=========================== Datasets ========================================
-// High-duplication / low-cardinality (values in 0..M-1)
 
-// CASE: High-duplication (uniform over 0..M-1)
+// CASE: Nearly-sorted with sparse errors (random swaps)
+// Kafka/Kinesis multi-partition fan-in (small K, sticky bursts, bounded jitter)
+// Consolidated market data (multi-venue feeds)
+// - K venues (10..20), each locally time/seq-sorted (non-decreasing).
+// - Bursty, sticky interleave to mimic transport jitter.
+// - Heavy equality clusters from coarse timestamp buckets.
+// - Stability on equal keys matters; your LadderSort (stable k-way merge)
+//   will preserve venue tie-order on ties.
+
+// Social feed assembly (per-user fan-in)
+// K followees, each locally sorted; bursty, sticky interleave.
+// Many equal timestamps create large tie plateaus across runs.
+
+// IoT / telemetry fan-in (dozens of sensors with bounded skew)
+// K sensors; per-round base time increases by 1. Each round, a random subset
+// of sensors emits; each sensor's timestamp = max(last_ts + inc, base + jitter)
+// so per-sensor sequences are non-decreasing. Small jitter => many ties.
+
+// Search-engine partial index merges (few segments, equality-heavy)
+// Model: K segments each contain a sorted posting list of docIDs drawn from a
+// shared universe U (so segments overlap -> many equal docIDs across runs).
+// We then interleave the K sorted runs in sticky bursts to mimic fan-in.
+// All values are non-negative so your push_back(-1) is still the global min.
+
 static std::vector<int> generate_dataset(size_t N, uint64_t seed) {
-    const int M = 1000; // cardinality
-    std::vector<int> out; out.reserve(N);
+    const int K          = 16;
+    const double overlap = 0.5;
+    const size_t U       = std::max<size_t>(1, (size_t)(N * overlap));
+    const int BURST_MAX  = 32;
+    const int STAY_PCT   = 60;
+    const int RIGHT_PCT  = 20;
+    std::vector<size_t> need(K);
+    { size_t q = N / K, r = N % K; for (int k = 0; k < K; ++k) need[k] = q + (k < (int)r ? 1 : 0); }
     uint64_t x = seed ? seed : 0x9E3779B97F4A7C15ULL;
-    auto rnd = [&]() -> uint64_t { x ^= x << 7; x ^= x >> 9; x *= 0x2545F4914F6CDD1ULL; return x; };
-    for (size_t i = 0; i < N; ++i) out.push_back((int)(rnd() % M));
+    auto rnd  = [&]() -> uint64_t { x ^= x << 7; x ^= x >> 9; x *= 0x2545F4914F6CDD1DULL; return x; };
+    std::vector<std::vector<int>> runs(K);
+    for (int k = 0; k < K; ++k) {
+        runs[k].reserve(need[k]);
+        size_t left = need[k];
+        size_t pos  = (size_t)(rnd() % std::max<size_t>(1, U / K));
+        while (left--) {
+            uint64_t r = rnd();
+            size_t gap = 1 + (size_t)(r % 4);
+            pos += gap;
+            if (pos >= U) pos = (size_t)(rnd() % (U / 2 + 1));
+            runs[k].push_back((int)pos);
+        }
+    }
+    std::vector<int> out; out.reserve(N);
+    std::vector<size_t> cur(K, 0);
+    auto has_more = [&](int s) -> bool { return cur[s] < runs[s].size(); };
+    int s = (int)(rnd() % K);
+    while (out.size() < N) {
+        if (!has_more(s)) {
+            int tries = 0;
+            while (tries < K && !has_more(s)) { s = (s + 1) % K; ++tries; }
+            if (tries == K) break;
+        }
+        int burst = 1 + (int)(rnd() % BURST_MAX);
+        while (burst-- > 0 && out.size() < N && has_more(s)) {
+            out.push_back(runs[s][cur[s]++]);
+        }
+        int toss = (int)(rnd() % 100);
+        if      (toss < STAY_PCT) { /* stay */ }
+        else if (toss < STAY_PCT + RIGHT_PCT) s = (s + 1) % K;
+        else                                  s = (s + K - 1) % K;
+    }
     return out;
 }
+
+
 
 //=========================== Benchmark harness (time only) ====================
 struct Result {
