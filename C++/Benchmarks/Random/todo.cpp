@@ -197,4 +197,3 @@ static std::vector<int> generate_dataset(size_t N, uint64_t seed) {
     }
     return out;
 }
-
