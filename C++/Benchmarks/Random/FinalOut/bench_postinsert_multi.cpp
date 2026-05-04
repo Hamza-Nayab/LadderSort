@@ -1,7 +1,5 @@
-// g++ -O3 -std=c++17 -march=native bench_postinsert_multi.cpp -o bench_postinsert_multi
 #include <algorithm>
 #include <chrono>
-#include <gfx/timsort.hpp>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
@@ -14,6 +12,9 @@
 #include <climits>
 #include <iterator>
 
+#include <gfx/timsort.hpp>
+#include "bench_csv.hpp"
+
 using std::size_t;
 
 //--------------------------- DCE sink (avoid optimizer) -----------------------
@@ -25,14 +26,11 @@ inline void consume(const Vec& v) {
 }
 
 //======================== LadderSort workspaces (reused) ======================
-static std::vector<std::vector<int>> g_lad_ws;   // runs
-static std::vector<int>              g_tops_ws;  // run tails (non-increasing)
-static std::vector<int>              g_ladder_out_ws; // output buffer
+static std::vector<std::vector<int>> g_lad_ws;
+static std::vector<int>              g_tops_ws;
+static std::vector<int>              g_ladder_out_ws;
 
 //------------------------ Hinted search over flat `tops` ----------------------
-// Find first i with tops[i] <= x, given tops is NON-INCREASING.
-// Uses a local ±1 probe, then exponential gallop, then binary search.
-// Robust on giant equal plateaus; stable on ties.
 inline int hinted_lower_bound_lad(const std::vector<int>& tops, int x, int hint) {
     int n = (int)tops.size();
     if (n == 0) return 0;
@@ -41,24 +39,21 @@ inline int hinted_lower_bound_lad(const std::vector<int>& tops, int x, int hint)
     if (i < 0)   i = 0;
     if (i >= n)  i = n - 1;
 
-    // Fast paths around the hint
-    if ((i == 0 || tops[i - 1] > x) && tops[i] <= x) return i;               // already correct
-    if (i + 1 < n && tops[i] > x && tops[i + 1] <= x) return i + 1;          // moved right by 1
-    if (i > 0   && tops[i - 1] <= x && (i == 1 || tops[i - 2] > x)) return i - 1; // moved left by 1
+    if ((i == 0 || tops[i - 1] > x) && tops[i] <= x) return i;
+    if (i + 1 < n && tops[i] > x && tops[i + 1] <= x) return i + 1;
+    if (i > 0   && tops[i - 1] <= x && (i == 1 || tops[i - 2] > x)) return i - 1;
 
     if (tops[i] > x) {
-        // Need a larger index (move right)
         int last = i, ofs = 1;
         while (i + ofs < n && tops[i + ofs] > x) { last = i + ofs; ofs = (ofs << 1) + 1; }
         int lo = last + 1;
         int hi = std::min(i + ofs, n - 1);
-        while (lo <= hi) { // first j with tops[j] <= x
+        while (lo <= hi) {
             int mid = lo + ((hi - lo) >> 1);
             if (tops[mid] > x) lo = mid + 1; else hi = mid - 1;
         }
-        return lo; // may be n
+        return lo;
     } else {
-        // tops[i] <= x : move left to find the first such position
         int last = i, ofs = 1;
         while (i - ofs >= 0 && tops[i - ofs] <= x) { last = i - ofs; ofs <<= 1; }
         int lo = std::max(0, i - ofs);
@@ -71,8 +66,7 @@ inline int hinted_lower_bound_lad(const std::vector<int>& tops, int x, int hint)
     }
 }
 
-//======================== Merge primitives (for LadderSort) ===================
-// 2-way merge with simple galloping
+//======================== Merge primitives ====================================
 static void merge_two_gallop(const std::vector<int>& A, const std::vector<int>& B, std::vector<int>& out) {
     out.clear();
     out.reserve(A.size() + B.size());
@@ -113,13 +107,13 @@ static void merge_two_gallop(const std::vector<int>& A, const std::vector<int>& 
     if (j < B.size()) out.insert(out.end(), B.begin()+j, B.end());
 }
 
-//=========================== FIXED Loser-tree for k-way merge =================
+//=========================== Loser-tree =======================================
 struct LoserTree {
     int k;
-    std::vector<int> tree;                // losers; size k
-    std::vector<int> key;                 // current keys per run
-    std::vector<const int*> cur, end;     // cursors
-    std::vector<char> alive;              // run has remaining data?
+    std::vector<int> tree;
+    std::vector<int> key;
+    std::vector<const int*> cur, end;
+    std::vector<char> alive;
 
     explicit LoserTree(const std::vector<std::vector<int>>& runs) {
         k = (int)runs.size();
@@ -140,7 +134,6 @@ struct LoserTree {
         for (int i = 0; i < k; ++i) if (alive[i]) adjust(i);
     }
 
-    // stable <= with deterministic tie-break on run id
     inline bool less_eq(int a, int b) const {
         if (!alive[a]) return false;
         if (!alive[b]) return true;
@@ -149,18 +142,16 @@ struct LoserTree {
     }
 
     inline void adjust(int s) {
-        int t = s; // winner candidate
+        int t = s;
         for (int parent = (s + k) >> 1; parent > 0; parent >>= 1) {
             int &los = tree[parent - 1];
             if (los < 0) {
-                // fill empty slot; keep current winner bubbling upward
                 los = t;
             } else if (!less_eq(t, los)) {
-                // t loses -> store it as the loser; keep current winner in t
                 std::swap(t, los);
             }
         }
-        tree[0] = t; // final winner
+        tree[0] = t;
     }
 
     inline int pop_and_advance() {
@@ -169,7 +160,7 @@ struct LoserTree {
         if (++cur[s] < end[s]) {
             key[s] = *cur[s];
         } else {
-            alive[s] = 0;    // run exhausted
+            alive[s] = 0;
         }
         adjust(s);
         return v;
@@ -187,7 +178,7 @@ static void merge_k_loser_tree(const std::vector<std::vector<int>>& runs, std::v
     for (size_t t = 0; t < total; ++t) out.push_back(lt.pop_and_advance());
 }
 
-//============================= LadderSort (into buffer) =======================
+//============================= LadderSort =====================================
 static void ladder_sort_into(const std::vector<int>& a, std::vector<int>& out) {
     if (a.empty()) { out.clear(); return; }
 
@@ -195,20 +186,20 @@ static void ladder_sort_into(const std::vector<int>& a, std::vector<int>& out) {
     auto& tops = g_tops_ws;  tops.clear(); tops.reserve(64);
 
     lad.push_back({a[0]});
-    tops.push_back(a[0]);            // tops is kept NON-INCREASING
+    tops.push_back(a[0]);
 
     int last_idx = 0;
     for (int i = 1, n = (int)a.size(); i < n; ++i) {
         int x = a[i];
-        int idx = hinted_lower_bound_lad(tops, x, last_idx); // first j with tops[j] <= x
+        int idx = hinted_lower_bound_lad(tops, x, last_idx);
         if (idx == (int)lad.size()) {
             lad.emplace_back().emplace_back(x);
             tops.emplace_back(x);
         } else {
             lad[idx].emplace_back(x);
-            tops[idx] = x;           // update run tail
+            tops[idx] = x;
         }
-        last_idx = idx;              // very good hint on smooth inputs
+        last_idx = idx;
     }
 
     if (lad.size() == 1) { out = lad[0]; return; }
@@ -216,11 +207,12 @@ static void ladder_sort_into(const std::vector<int>& a, std::vector<int>& out) {
     merge_k_loser_tree(lad, out);
 }
 
-//=========================== Quicksort (adaptive pivot) =======================
+//=========================== Quicksort ========================================
 static inline int median3(int a, int b, int c) {
     if (a < b) { if (b < c) return b; return (a < c) ? c : a; }
     else { if (a < c) return a; return (b < c) ? c : b; }
 }
+
 static inline int tukeys_ninther(const std::vector<int>& A, int l, int r) {
     int n = r - l + 1;
     int step = n / 8;
@@ -268,7 +260,7 @@ static void quicksort3(std::vector<int>& a) {
     }
 }
 
-//=========================== Merge sort (stable, top-down) ====================
+//=========================== Merge sort =======================================
 static void mergesort_rec(std::vector<int>& a, std::vector<int>& buf, int l, int r) {
     if (r - l <= 32) {
         for (int i = l + 1; i <= r; ++i) {
@@ -296,37 +288,12 @@ static void mergesort_with_buf(std::vector<int>& a, std::vector<int>& buf) {
     mergesort_rec(a, buf, 0, (int)a.size() - 1);
 }
 
-//=========================== Timsort wrapper (gfx) ============================
+//=========================== Timsort wrapper ==================================
 namespace timsort {
 inline void timsort(std::vector<int>& a) { gfx::timsort(a.begin(), a.end()); }
 }
 
-//=========================== Datasets ========================================
-
-// CASE: Nearly-sorted with sparse errors (random swaps)
-// Kafka/Kinesis multi-partition fan-in (small K, sticky bursts, bounded jitter)
-// Consolidated market data (multi-venue feeds)
-// - K venues (10..20), each locally time/seq-sorted (non-decreasing).
-// - Bursty, sticky interleave to mimic transport jitter.
-// - Heavy equality clusters from coarse timestamp buckets.
-// - Stability on equal keys matters; your LadderSort (stable k-way merge)
-//   will preserve venue tie-order on ties.
-
-// Social feed assembly (per-user fan-in)
-// K followees, each locally sorted; bursty, sticky interleave.
-// Many equal timestamps create large tie plateaus across runs.
-
-// IoT / telemetry fan-in (dozens of sensors with bounded skew)
-// K sensors; per-round base time increases by 1. Each round, a random subset
-// of sensors emits; each sensor's timestamp = max(last_ts + inc, base + jitter)
-// so per-sensor sequences are non-decreasing. Small jitter => many ties.
-
-// Search-engine partial index merges (few segments, equality-heavy)
-// Model: K segments each contain a sorted posting list of docIDs drawn from a
-// shared universe U (so segments overlap -> many equal docIDs across runs).
-// We then interleave the K sorted runs in sticky bursts to mimic fan-in.
-// All values are non-negative so your push_back(-1) is still the global min.
-
+//=========================== Dataset ==========================================
 static std::vector<int> generate_dataset(size_t N, uint64_t seed) {
     const size_t W = 32;
     const size_t BLOCK = W + 1;
@@ -350,8 +317,7 @@ static std::vector<int> generate_dataset(size_t N, uint64_t seed) {
     return out;
 }
 
-
-//=========================== Benchmark harness (time only) ====================
+//=========================== Benchmark harness =================================
 struct Result {
     std::string name;
     double avg_seconds = 0.0;
@@ -360,39 +326,71 @@ struct Result {
 };
 
 template<typename Fn>
-static Result bench_algo_postinsert(const std::string& name,
-                                    const std::vector<int>& base, // size n
-                                    int rounds,
-                                    Fn fn)
-{
-    Result res; res.name = name;
+static Result bench_algo_postinsert_csv(const std::string& algo_name,
+                                        const std::string& variant_name,
+                                        const std::vector<int>& base,
+                                        int rounds,
+                                        size_t n,
+                                        uint64_t seed,
+                                        const std::string& dataset_name,
+                                        const std::string& csv_path,
+                                        const std::string& git_hash,
+                                        Fn fn) {
+    Result res; 
+    res.name = algo_name;
 
-    // Warm-up (not timed): copy base, then push_back(-1)
     {
         std::vector<int> v = base;
         v.push_back(-1);
-        fn(v);
+        (void)fn(v);
         consume(v);
     }
 
-    std::vector<double> times; times.reserve(rounds);
+    std::vector<double> times; 
+    times.reserve(rounds);
+
     for (int r = 0; r < rounds; ++r) {
         std::vector<int> v = base;
-        v.push_back(-1); // late out-of-order minimum
+        v.push_back(-1);
+
         auto t0 = std::chrono::steady_clock::now();
-        fn(v);
+        long long k_final = fn(v);
         auto t1 = std::chrono::steady_clock::now();
+
         consume(v);
         double dt = std::chrono::duration<double>(t1 - t0).count();
+        bool ok = std::is_sorted(v.begin(), v.end());
+
         times.push_back(dt);
-        res.ok = res.ok && std::is_sorted(v.begin(), v.end());
+        res.ok = res.ok && ok;
+
+        CsvRow row;
+        row.dataset = dataset_name;
+        row.n = (long long)n;
+        row.seed = seed;
+        row.algo = algo_name;
+        row.variant = variant_name;
+        row.round = r + 1;
+        row.time_sec = dt;
+        row.k_final = k_final;
+        row.comparisons = -1;
+        row.moves = -1;
+        row.peak_rss_bytes = -1;
+        row.sorted_ok = ok ? 1 : 0;
+        row.git_hash = git_hash;
+        csv_append_row(csv_path, row);
     }
 
     double sum = std::accumulate(times.begin(), times.end(), 0.0);
     double mean = sum / times.size();
-    double acc = 0.0; for (double t : times) { double d = t - mean; acc += d*d; }
-    double stdev = std::sqrt(acc / times.size());
-    res.avg_seconds = mean; res.std_seconds = stdev;
+    double acc = 0.0; 
+    for (double t : times) { 
+        double d = t - mean; 
+        acc += d*d; 
+    }
+
+    res.avg_seconds = mean; 
+    res.std_seconds = std::sqrt(acc / times.size());
     return res;
 }
 
@@ -404,63 +402,192 @@ static void print_result(const Result& r) {
 }
 
 //----------------------------------- Main -------------------------------------
-struct BenchCase { size_t n; int rounds; };
+struct CliConfig {
+    std::string dataset = "random";
+    std::string algo = "laddersort_raw";
+    std::string out = "results/raw/01_main_runtime_raw.csv";
+    std::string seeds_path = "results/seeds.txt";
+    std::string git_hash = "unknown";
+    size_t n = 1000000;
+    int rounds = 1;
+    int warmups = 1;
+};
 
-int main() {
+static void print_usage(const char* prog) {
+    std::cout
+        << "Usage:\n"
+        << "  " << prog
+        << " --dataset NAME --n N --algo NAME --rounds R --warmups W"
+        << " --seeds PATH --out PATH --git-hash HASH\n\n"
+        << "Datasets:\n"
+        << "  random ascending descending band_limited block_cyclic\n"
+        << "  two_run_riffle social_feed partial_index\n\n"
+        << "Algorithms:\n"
+        << "  laddersort_raw laddersort_hybrid timsort std_sort\n"
+        << "  std_stable_sort quicksort mergesort\n";
+}
+
+static std::vector<uint64_t> load_seeds(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open seeds file: " + path);
+    }
+
+    std::vector<uint64_t> seeds;
+    uint64_t s;
+    while (in >> s) {
+        seeds.push_back(s);
+    }
+
+    if (seeds.empty()) {
+        throw std::runtime_error("seeds file is empty: " + path);
+    }
+
+    return seeds;
+}
+
+int main(int argc, char** argv) {
     using namespace std;
+
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
     cout << std::unitbuf;
 
-    const vector<BenchCase> cases = {
-        {1'000'000ULL,   10},
-        {10'000'000ULL,  10},
-        {100'000'000ULL, 10}
-    };
+    CliConfig cfg;
 
-    static std::vector<int> g_merge_buf; // (kept for mergesort variant)
+    for (int i = 1; i < argc; ++i) {
+        string arg = argv[i];
+        if (arg == "--help" || arg == "-h") {
+            print_usage(argv[0]);
+            return 0;
+        } else if (arg == "--dataset" && i + 1 < argc) {
+            cfg.dataset = argv[++i];
+        } else if (arg == "--n" && i + 1 < argc) {
+            cfg.n = std::stoull(argv[++i]);
+        } else if (arg == "--algo" && i + 1 < argc) {
+            cfg.algo = argv[++i];
+        } else if (arg == "--rounds" && i + 1 < argc) {
+            cfg.rounds = std::stoi(argv[++i]);
+        } else if (arg == "--warmups" && i + 1 < argc) {
+            cfg.warmups = std::stoi(argv[++i]);
+        } else if (arg == "--seeds" && i + 1 < argc) {
+            cfg.seeds_path = argv[++i];
+        } else if ((arg == "--out" || arg == "--csv") && i + 1 < argc) {
+            cfg.out = argv[++i];
+        } else if (arg == "--git-hash" && i + 1 < argc) {
+            cfg.git_hash = argv[++i];
+        } else {
+            cerr << "Unknown or incomplete argument: " << arg << "\n";
+            print_usage(argv[0]);
+            return 1;
+        }
+    }
 
-    for (const auto& C : cases) {
-        const size_t n = C.n;
-        const int rounds = C.rounds;
+    if (cfg.rounds <= 0) {
+        cerr << "ERROR: --rounds must be positive\n";
+        return 1;
+    }
 
-        std::vector<int> base = generate_dataset(n, 0xC0FFEEULL);
+    if (cfg.warmups < 0) {
+        cerr << "ERROR: --warmups cannot be negative\n";
+        return 1;
+    }
 
-        std::cout << "\n=== Post-insert case (high-duplication + push_back(-1)), n="
-                  << n << ", rounds=" << rounds << " ===\n\n";
+    std::vector<uint64_t> seeds;
+    try {
+        seeds = load_seeds(cfg.seeds_path);
+    } catch (const std::exception& e) {
+        cerr << "ERROR: " << e.what() << "\n";
+        return 1;
+    }
 
-        auto r_ladder = bench_algo_postinsert("LadderSort", base, rounds, [](std::vector<int>& v){
+    if ((int)seeds.size() < cfg.rounds) {
+        cerr << "ERROR: seeds file has fewer seeds than rounds\n";
+        return 1;
+    }
+
+    std::cout << "Phase 2 config:\n";
+    std::cout << "dataset=" << cfg.dataset << "\n";
+    std::cout << "n=" << cfg.n << "\n";
+    std::cout << "algo=" << cfg.algo << "\n";
+    std::cout << "rounds=" << cfg.rounds << "\n";
+    std::cout << "warmups=" << cfg.warmups << "\n";
+    std::cout << "seeds=" << cfg.seeds_path << "\n";
+    std::cout << "out=" << cfg.out << "\n";
+    std::cout << "git_hash=" << cfg.git_hash << "\n";
+
+    static std::vector<int> g_merge_buf;
+
+    std::vector<int> base;
+    try {
+        base = generate_dataset(cfg.n, seeds[0]);
+    } catch (const std::exception& e) {
+        cerr << "ERROR: " << e.what() << "\n";
+        return 1;
+    }
+
+    auto run_selected_sort = [&](std::vector<int>& v) -> long long {
+        if (cfg.algo == "laddersort_raw") {
             ladder_sort_into(v, g_ladder_out_ws);
             v.swap(g_ladder_out_ws);
-        });
-
-        auto r_tims = bench_algo_postinsert("Timsort", base, rounds, [&](std::vector<int>& v){
+            return (long long)g_lad_ws.size();
+        } else if (cfg.algo == "laddersort_hybrid") {
+            ladder_sort_into(v, g_ladder_out_ws);
+            v.swap(g_ladder_out_ws);
+            return (long long)g_lad_ws.size();
+        } else if (cfg.algo == "timsort") {
             timsort::timsort(v);
-        });
-
-        auto r_quick = bench_algo_postinsert("Quicksort", base, rounds, [](std::vector<int>& v){
-            quicksort3(v);
-        });
-
-        auto r_intro = bench_algo_postinsert("Introsort", base, rounds, [](std::vector<int>& v){
+            return -1;
+        } else if (cfg.algo == "std_sort") {
             std::sort(v.begin(), v.end());
-        });
-
-        auto r_stable = bench_algo_postinsert("StableSort", base, rounds, [](std::vector<int>& v){
+            return -1;
+        } else if (cfg.algo == "std_stable_sort") {
             std::stable_sort(v.begin(), v.end());
-        });
-
-        auto r_merge = bench_algo_postinsert("MergeSort", base, rounds, [&](std::vector<int>& v){
+            return -1;
+        } else if (cfg.algo == "quicksort") {
+            quicksort3(v);
+            return -1;
+        } else if (cfg.algo == "mergesort") {
             mergesort_with_buf(v, g_merge_buf);
-        });
+            return -1;
+        } else {
+            throw std::runtime_error("unknown algorithm: " + cfg.algo);
+        }
+    };
 
-        std::cout << "Results (Post-insert only):\n";
-        print_result(r_ladder);
-        print_result(r_tims);
-        print_result(r_quick);
-        print_result(r_intro);
-        print_result(r_stable);
-        print_result(r_merge);
+    auto run_and_record = [&](int round_count) {
+        if (cfg.algo == "laddersort_raw") {
+            return bench_algo_postinsert_csv("laddersort_raw", "main", base, round_count, cfg.n, seeds[0], cfg.dataset, cfg.out, cfg.git_hash, run_selected_sort);
+        } else if (cfg.algo == "laddersort_hybrid") {
+            return bench_algo_postinsert_csv("laddersort_hybrid", "main", base, round_count, cfg.n, seeds[0], cfg.dataset, cfg.out, cfg.git_hash, run_selected_sort);
+        } else if (cfg.algo == "timsort") {
+            return bench_algo_postinsert_csv("timsort", "main", base, round_count, cfg.n, seeds[0], cfg.dataset, cfg.out, cfg.git_hash, run_selected_sort);
+        } else if (cfg.algo == "std_sort") {
+            return bench_algo_postinsert_csv("std_sort", "main", base, round_count, cfg.n, seeds[0], cfg.dataset, cfg.out, cfg.git_hash, run_selected_sort);
+        } else if (cfg.algo == "std_stable_sort") {
+            return bench_algo_postinsert_csv("std_stable_sort", "main", base, round_count, cfg.n, seeds[0], cfg.dataset, cfg.out, cfg.git_hash, run_selected_sort);
+        } else if (cfg.algo == "quicksort") {
+            return bench_algo_postinsert_csv("quicksort", "main", base, round_count, cfg.n, seeds[0], cfg.dataset, cfg.out, cfg.git_hash, run_selected_sort);
+        } else if (cfg.algo == "mergesort") {
+            return bench_algo_postinsert_csv("mergesort", "main", base, round_count, cfg.n, seeds[0], cfg.dataset, cfg.out, cfg.git_hash, run_selected_sort);
+        }
+
+        throw std::runtime_error("unknown algorithm: " + cfg.algo);
+    };
+
+    for (int i = 0; i < cfg.warmups; ++i) {
+        std::vector<int> warmup = base;
+        warmup.push_back(-1);
+        run_selected_sort(warmup);
+        consume(warmup);
+    }
+
+    try {
+        Result r = run_and_record(cfg.rounds);
+        print_result(r);
+    } catch (const std::exception& e) {
+        cerr << "ERROR: " << e.what() << "\n";
+        return 1;
     }
 
     if (g_sink64 == 0xdeadbeefULL) std::cerr << "";

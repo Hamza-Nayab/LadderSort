@@ -71,6 +71,53 @@ inline int hinted_lower_bound_lad(const std::vector<int>& tops, int x, int hint)
     }
 }
 
+//-------------------- Finger search around previous ladder --------------------
+// First tries a very small local walk around `hint` (the previous ladder),
+// then falls back to the original hinted gallop+binary search if needed.
+// This helps when the target ladder index changes slowly across elements.
+inline int clamp_hint(int hint, int n) {
+    if (n <= 0) return 0;
+    if (hint < 0) return 0;
+    if (hint >= n) return n - 1;
+    return hint;
+}
+
+inline int finger_search_lad(const std::vector<int>& tops, int x, int hint) {
+    int n = (int)tops.size();
+    if (n == 0) return 0;
+
+    int i = clamp_hint(hint, n);
+
+    // Exact hit at hint?
+    if ((i == 0 || tops[i - 1] > x) && tops[i] <= x) return i;
+
+    // Try a tiny local walk first. This is the micro-optimization.
+    constexpr int LOCAL_STEPS = 6;
+
+    if (tops[i] > x) {
+        // Likely need to move right
+        int j = i;
+        int steps = 0;
+        while (steps < LOCAL_STEPS && j + 1 < n && tops[j] > x) {
+            ++j;
+            ++steps;
+            if ((j == 0 || tops[j - 1] > x) && tops[j] <= x) return j;
+        }
+    } else {
+        // tops[i] <= x, likely need to move left
+        int j = i;
+        int steps = 0;
+        while (steps < LOCAL_STEPS && j > 0 && tops[j - 1] <= x) {
+            --j;
+            ++steps;
+            if ((j == 0 || tops[j - 1] > x) && tops[j] <= x) return j;
+        }
+    }
+
+    // Fallback to the original robust search
+    return hinted_lower_bound_lad(tops, x, i);
+}
+
 //======================== Merge primitives (for LadderSort) ===================
 // 2-way merge with simple galloping
 static void merge_two_gallop(const std::vector<int>& A, const std::vector<int>& B, std::vector<int>& out) {
@@ -200,7 +247,7 @@ static void ladder_sort_into(const std::vector<int>& a, std::vector<int>& out) {
     int last_idx = 0;
     for (int i = 1, n = (int)a.size(); i < n; ++i) {
         int x = a[i];
-        int idx = hinted_lower_bound_lad(tops, x, last_idx); // first j with tops[j] <= x
+        int idx = finger_search_lad(tops, x, last_idx); // improved lookup
         if (idx == (int)lad.size()) {
             lad.emplace_back().emplace_back(x);
             tops.emplace_back(x);
@@ -208,7 +255,7 @@ static void ladder_sort_into(const std::vector<int>& a, std::vector<int>& out) {
             lad[idx].emplace_back(x);
             tops[idx] = x;           // update run tail
         }
-        last_idx = idx;              // very good hint on smooth inputs
+        last_idx = idx;              // strong hint for next element
     }
 
     if (lad.size() == 1) { out = lad[0]; return; }
