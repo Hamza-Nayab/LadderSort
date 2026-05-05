@@ -876,6 +876,90 @@ your pipeline naturally produces a few ordered sources or bounded-jitter
 streams; reach for TimSort on long runs (including descending), and
 prefer \texttt{std::sort} when inputs look unstructured.
 
+\subsection{Ablation Study}
+\label{ablation-study}
+
+The ablation study isolates the main engineering choices inside LadderSort.
+We evaluate five variants: LadderFull, NoHint, NoGallop, HeapMerge, and
+StableMode. Table~\ref{tab:phase4-ablation} reports median relative time,
+normalized to LadderFull for the same workload and size. The social-feed
+workload represents the \(K>2\) fan-in regime (\(K=24\)), while two-run
+riffle isolates the \(K=2\) merge path.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Phase 4 ablation results. Entries are median relative time normalized to LadderFull \(=1.00\) for the same workload and input size. Values above 1.00 are slower than LadderFull, while values below 1.00 are faster.}
+\label{tab:phase4-ablation}
+\begin{tabularx}{\linewidth}{@{}l X rrr rrr@{}}
+\toprule
+& & \multicolumn{3}{c}{Social-feed (\(K=24\))} & \multicolumn{3}{c}{Two-run riffle (\(K=2\))} \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}
+Variant & Purpose & \(10^6\) & \(10^7\) & \(10^8\) & \(10^6\) & \(10^7\) & \(10^8\) \\
+\midrule
+LadderFull & Full implementation & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+NoHint & Disable hinted placement & 1.71 & 1.75 & 1.28 & 0.86 & 0.84 & 0.68 \\
+NoGallop & Disable galloping merge & 0.97 & 0.99 & 0.72 & 1.07 & 1.06 & 0.79 \\
+HeapMerge & Replace loser tree with heap & 1.94 & 2.05 & 1.51 & 1.02 & 1.00 & 0.82 \\
+StableMode & Preserve global stability & 1.03 & 1.07 & 1.26 & 1.05 & 1.07 & 1.43 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The social-feed ablation shows that the locality-aware placement search and
+loser-tree merge are important in the \(K>2\) fan-in regime. Removing the hint
+increases median time by \(1.28\times\)--\(1.75\times\), and replacing the loser
+tree with a heap increases median time by \(1.51\times\)--\(2.05\times\).
+StableMode adds overhead most clearly at \(10^8\), where it is \(1.26\times\)
+slower than LadderFull.
+
+The \(K=2\) two-run riffle ablation is more mixed. Disabling galloping is
+slightly slower at \(10^6\) and \(10^7\), but faster at \(10^8\). Similarly,
+NoHint is faster on this workload, indicating that the hinted-search overhead
+is not always worthwhile when the decomposition is fixed at two ladders. We
+therefore interpret galloping and hinting as workload-sensitive optimizations
+rather than universally dominant components.
+
+\subsection{Hybrid LadderSort}
+\label{hybrid-laddersort}
+
+Hybrid LadderSort is a practical safeguard rather than the main algorithmic
+contribution. The raw algorithm exposes the structural \(O(N\log K)\) behavior
+directly. The hybrid variant monitors the ladder count during decomposition and
+falls back when \(K\) exceeds the threshold, aiming to avoid the descending and
+random-input worst cases while preserving the small-\(K\) path.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Hybrid LadderSort evaluation. Speedups are based on median runtime. The fallback rate is the fraction of runs in which Hybrid LadderSort switched to its fallback path.}
+\label{tab:phase4-hybrid}
+\begin{tabularx}{\linewidth}{@{}l r r r r X@{}}
+\toprule
+Dataset & \(N\) & Fallback rate & Hybrid vs Raw & Hybrid vs TimSort & Interpretation \\
+\midrule
+Descending & \(10^6\) & 1.00 & 5.71 & 0.07 & Avoids raw worst case; TimSort best case \\
+Descending & \(10^7\) & 1.00 & 6.36 & 0.07 & Avoids raw worst case; TimSort best case \\
+Descending & \(10^8\) & 1.00 & 4.14 & 0.03 & Avoids raw worst case; TimSort best case \\
+Random & \(10^6\) & 1.00 & 1.62 & 2.51 & Fallback improves over raw \\
+Random & \(10^7\) & 1.00 & 1.67 & 2.66 & Fallback improves over raw \\
+Random & \(10^8\) & 1.00 & 1.75 & 2.77 & Fallback improves over raw \\
+Block-cyclic & \(10^6\) & 0.00 & 0.90 & 1.81 & Preserves small-\(K\) path \\
+Block-cyclic & \(10^7\) & 0.00 & 1.03 & 1.75 & Preserves small-\(K\) path \\
+Block-cyclic & \(10^8\) & 0.00 & 1.12 & 1.66 & Preserves small-\(K\) path \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The fallback behavior matches the intended design. On descending and random
+inputs, Hybrid LadderSort falls back in every run, reducing the penalty of raw
+LadderSort on these unfavorable inputs. On block-cyclic inputs, where \(K=8\),
+the fallback rate is zero, so the hybrid preserves the small-\(K\) LadderSort
+path and remains faster than TimSort. Thus, Hybrid LadderSort should be viewed
+as a practical guardrail: it protects against high-\(K\) regimes without
+changing the core contribution, which is the raw \(K\)-adaptive decomposition
+and merge.
+
 \subsection{\texorpdfstring{\textbf{Asymptotic Behavior and Structural Interpretation}}{Asymptotic Behavior and Structural Interpretation}}\label{asymptotic-behavior-and-structural-interpretation}
 
 The empirical results above are consistent with the theoretical analysis
