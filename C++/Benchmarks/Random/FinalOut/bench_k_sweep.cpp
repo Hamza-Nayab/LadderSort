@@ -7,6 +7,7 @@
 #include <iostream>
 #include <numeric>
 #include <queue>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -411,8 +412,134 @@ inline void timsort(std::vector<int>& a) {
 }
 }
 
-//======================== Controlled exact-K generator ========================
-static std::vector<int> generate_controlled_k_exact(size_t N, int K) {
+static inline uint64_t rng_next_u64(uint64_t& x) {
+    x ^= x << 7;
+    x ^= x >> 9;
+    x *= 0x2545F4914F6CDD1DULL;
+    return x;
+}
+
+static int pick_available_stream(
+    const std::vector<size_t>& remaining,
+    uint64_t& rng
+) {
+    const int K = (int)remaining.size();
+
+    for (int tries = 0; tries < 32; ++tries) {
+        int j = (int)(rng_next_u64(rng) % (uint64_t)K);
+        if (remaining[j] > 0) return j;
+    }
+
+    for (int j = 0; j < K; ++j) {
+        if (remaining[j] > 0) return j;
+    }
+
+    return -1;
+}
+
+// Randomized/sticky exact-K generator.
+//
+// Construction idea:
+// 1. Emit one decreasing prefix of length K to force exactly K ladders.
+// 2. Give each ladder a large separated numeric band.
+// 3. Emit the remaining elements in randomized sticky bursts.
+// 4. Each emitted value is guaranteed to be placed into its intended ladder by
+//    the same leftmost-tail rule used by LadderSort.
+// 5. This avoids the repeated long descending blocks that favor TimSort.
+//
+// For ladder j:
+//   base[j] = (K - 1 - j) * stride
+//   values for that ladder are base[j], base[j] + 1, base[j] + 2, ...
+//
+// Because stride > max ladder length, values from ladder j never cross the
+// current band of ladder j-1, so greedy placement never creates more than K
+// ladders and measured_K remains exactly K.
+static std::vector<int> generate_controlled_k_randomized_exact(
+    size_t N,
+    int K,
+    uint64_t seed = 0xC0FFEE123456789ULL
+) {
+    if (K <= 0) {
+        throw std::runtime_error("K must be positive");
+    }
+
+    if (N < (size_t)K) {
+        throw std::runtime_error("N must be at least K for exact-K generation");
+    }
+
+    std::vector<size_t> target_len(K);
+    size_t q = N / (size_t)K;
+    size_t r = N % (size_t)K;
+
+    size_t max_len = 0;
+    for (int j = 0; j < K; ++j) {
+        target_len[j] = q + ((size_t)j < r ? 1 : 0);
+        max_len = std::max(max_len, target_len[j]);
+    }
+
+    const int64_t stride = (int64_t)max_len + 1024;
+
+    if ((int64_t)K * stride > (int64_t)std::numeric_limits<int>::max()) {
+        throw std::runtime_error("controlled K generator exceeds int range");
+    }
+
+    std::vector<int64_t> base(K);
+    for (int j = 0; j < K; ++j) {
+        base[j] = (int64_t)(K - 1 - j) * stride;
+    }
+
+    std::vector<int> out;
+    out.reserve(N);
+
+    for (int j = 0; j < K; ++j) {
+        out.push_back((int)base[j]);
+    }
+
+    std::vector<size_t> remaining(K);
+    std::vector<size_t> next_offset(K, 1);
+
+    size_t remaining_total = 0;
+    for (int j = 0; j < K; ++j) {
+        remaining[j] = target_len[j] - 1;
+        remaining_total += remaining[j];
+    }
+
+    uint64_t rng = seed ? seed : 0xC0FFEE123456789ULL;
+    int active = pick_available_stream(remaining, rng);
+
+    while (remaining_total > 0) {
+        if (active < 0 || remaining[active] == 0) {
+            active = pick_available_stream(remaining, rng);
+            if (active < 0) break;
+        }
+
+        size_t burst = 1 + (size_t)(rng_next_u64(rng) % 16ULL);
+
+        while (burst-- > 0 && remaining_total > 0 && remaining[active] > 0) {
+            int64_t value = base[active] + (int64_t)next_offset[active];
+
+            if (value > (int64_t)std::numeric_limits<int>::max()) {
+                throw std::runtime_error("generated value exceeds int range");
+            }
+
+            out.push_back((int)value);
+            ++next_offset[active];
+            --remaining[active];
+            --remaining_total;
+        }
+
+        active = pick_available_stream(remaining, rng);
+    }
+
+    if (out.size() != N) {
+        throw std::runtime_error("controlled K generator produced wrong N");
+    }
+
+    return out;
+}
+
+// Reference-only reverse-block exact-K generator retained for comparison.
+static std::vector<int> generate_controlled_k_reverse_block_exact(size_t N, int K) {
     std::vector<int> out;
     out.reserve(N);
 
@@ -439,6 +566,29 @@ static std::vector<int> generate_controlled_k_exact(size_t N, int K) {
     }
 
     return out;
+}
+
+static void validate_randomized_exact_k_generator() {
+    const size_t test_n = 1'000'000;
+
+    for (int K : {1, 2, 4, 8, 16, 32, 64, 128}) {
+        auto a = generate_controlled_k_randomized_exact(
+            test_n,
+            K,
+            0xC0FFEE123456789ULL + (uint64_t)K
+        );
+
+        long long measured = measure_k_only(a);
+
+        std::cout << "randomized_exact target_K=" << K
+                  << " measured_K=" << measured << "\n";
+
+        if (measured != K) {
+            throw std::runtime_error("randomized exact-K generator failed");
+        }
+    }
+
+    std::cout << "Randomized exact-K generator validation passed.\n";
 }
 
 //======================== Controlled sweep schema ============================
@@ -510,6 +660,8 @@ int main(int argc, char** argv) {
     std::string out_path = kSweepOutPath;
     std::string git_hash = "unknown";
     const uint64_t seed = 0;
+    int only_k = -1;
+    std::string only_algo = "";
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -517,7 +669,8 @@ int main(int argc, char** argv) {
         if (arg == "--help" || arg == "-h") {
             cout << "Usage:\n"
                  << "  " << argv[0]
-                 << " --rounds 10 --warmups 1 --n 10000000 --out results/raw/05_k_sweep_raw.csv --git-hash HASH\n";
+                 << " --rounds 10 --warmups 1 --n 10000000 --out results/raw/05_k_sweep_raw.csv --git-hash HASH\n"
+                 << "  Optional: --only-k K --only-algo ALGO (to run specific K and algo only)\n";
             return 0;
         } else if (arg == "--rounds" && i + 1 < argc) {
             rounds = std::stoi(argv[++i]);
@@ -529,6 +682,10 @@ int main(int argc, char** argv) {
             out_path = argv[++i];
         } else if (arg == "--git-hash" && i + 1 < argc) {
             git_hash = argv[++i];
+        } else if (arg == "--only-k" && i + 1 < argc) {
+            only_k = std::stoi(argv[++i]);
+        } else if (arg == "--only-algo" && i + 1 < argc) {
+            only_algo = argv[++i];
         } else {
             cerr << "Unknown or incomplete argument: " << arg << "\n";
             return 1;
@@ -562,14 +719,28 @@ int main(int argc, char** argv) {
     std::cout << "out=" << out_path << "\n";
     std::cout << "git_hash=" << git_hash << "\n";
 
+    validate_randomized_exact_k_generator();
+
+    if (only_k >= 0 || !only_algo.empty()) {
+        std::cout << "Running in filtered mode: only_k=" << only_k << " only_algo=" << only_algo << "\n";
+    }
+
     for (int target_k : target_ks) {
+        if (only_k >= 0 && target_k != only_k) {
+            continue;
+        }
+
         std::cout << "target_k=" << target_k << "\n";
 
-        std::vector<int> base = generate_controlled_k_exact(n, target_k);
+        std::vector<int> base = generate_controlled_k_randomized_exact(n, target_k, 0xC0FFEE123456789ULL);
         long long measured_k = measure_k_only(base);
         double k_over_n = (double)measured_k / (double)n;
 
         for (const auto& algo : kSweepAlgorithms) {
+            if (!only_algo.empty() && algo != only_algo) {
+                continue;
+            }
+
             const std::string variant = (algo == "HybridLadderSort") ? "hybrid" : "main";
             LadderStats st;
 

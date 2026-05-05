@@ -5,7 +5,12 @@ import matplotlib.pyplot as plt
 
 Path("results/plots").mkdir(parents=True, exist_ok=True)
 
-df = pd.read_csv("results/summary/06_k_sweep_summary.csv")
+# Prefer filtered summary if available (robustness against system-noise outliers)
+summary_path = Path("results/summary/06_k_sweep_summary_filtered.csv")
+if not summary_path.exists():
+    summary_path = Path("results/summary/06_k_sweep_summary.csv")
+
+df = pd.read_csv(summary_path)
 
 n = df["n"].max()
 df = df[df["n"] == n]
@@ -19,15 +24,15 @@ for algo in ["LadderSort", "HybridLadderSort", "TimSort", "StdSort", "StableSort
 
     plt.plot(
         sub["measured_k_mean"],
-        sub["mean_sec"],
+        sub["median_sec"],
         marker="o",
         label=algo,
     )
 
 plt.xscale("log", base=2)
 plt.xlabel("Measured ladder count K")
-plt.ylabel("Mean runtime (seconds)")
-plt.title(f"Runtime vs measured K, N={n}")
+plt.ylabel("Median runtime (seconds)")
+plt.title(f"Runtime vs measured K, randomized exact-K interleaving, N={n}")
 plt.legend()
 plt.tight_layout()
 plt.savefig("results/plots/k_sweep_runtime_vs_k.pdf")
@@ -43,7 +48,7 @@ for algo in ["LadderSort", "HybridLadderSort", "StdSort", "StableSort"]:
 
     plt.plot(
         sub["measured_k_mean"],
-        sub["speedup_vs_timsort"],
+        sub["speedup_vs_timsort_median"],
         marker="o",
         label=algo,
     )
@@ -52,7 +57,7 @@ plt.axhline(1.0, linestyle="--")
 plt.xscale("log", base=2)
 plt.xlabel("Measured ladder count K")
 plt.ylabel("Speedup vs TimSort")
-plt.title(f"Speedup vs TimSort as K varies, N={n}")
+plt.title(f"Speedup vs TimSort, randomized exact-K interleaving, N={n}")
 plt.legend()
 plt.tight_layout()
 plt.savefig("results/plots/k_sweep_speedup_vs_k.pdf")
