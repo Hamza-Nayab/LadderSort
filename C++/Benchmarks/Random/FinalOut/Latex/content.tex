@@ -12,7 +12,7 @@
 \usepackage{algpseudocode}
 \usepackage{graphicx}
 \usepackage{float}
-\usepackage{longtable,booktabs,array}
+\usepackage{longtable,booktabs,array,tabularx}
 \usepackage{calc}
 \usepackage{etoolbox}
 \IfFileExists{microtype.sty}{\usepackage{microtype}}{}
@@ -420,6 +420,14 @@ All binaries were single-threaded and used only the compiler’s auto-vectorizat
 \item \textbf{StableSort:} C++ \texttt{std::stable\_sort}.
 \item \textbf{MergeSort:} reference top-down stable mergesort with a reusable buffer.
 \end{itemize}
+
+\subsection{Measured \(K\) and Controlled \(K\)-Sweep Protocol}
+\label{k-measurement-protocol}
+
+We measure \(K\) using the same deterministic tail-guided placement rule as Phase~1, but without performing the final merge. For the main workloads, \(K\) is recorded for every dataset, size, and seed, and the resulting measurements are summarized using mean, median, minimum, and maximum values.
+
+For the controlled \(K\)-sweep, we generate randomized exact-\(K\) interleavings at \(N=10^7\). The generator creates exactly the target number of ladders while avoiding repeated descending blocks that would favor run-adaptive baselines. We report median time over 10 timed rounds after one warm-up. The raw data and unfiltered summary are retained; the paper figures use a filtered summary that removes extreme \(\texttt{time\_sec} > 10.0\)s outliers caused by system-level paging or background noise. This filtering removed 6 of 400 rows (1.5\%); all correctness checks passed, and all filtered groups retained at least 8 samples.
+
 \section{\texorpdfstring{\textbf{Results and Discussion}}{Results and Discussion}}\label{results-and-discussion}
 
 This section reports the empirical performance of LadderSort compared
@@ -427,7 +435,7 @@ with several baseline sorting algorithms under a range of input
 distributions. For each workload, we sort arrays of 1 million, 10
 million, and 100 million 32-bit integers. Each configuration (algorithm,
 workload, size) is run 10 times; we report mean wall-clock time and
-standard deviation. All algorithms are compiled with the same toolchain
+standard deviation. For the controlled \(K\)-sweep, we report median runtime because a small number of system-level timing outliers were observed during long benchmark runs; both unfiltered and filtered summaries are retained for reproducibility. All algorithms are compiled with the same toolchain
 and flags, and all runs are single-threaded. Correctness is verified
 after every run using a standard sortedness check.
 
@@ -438,6 +446,50 @@ StableSort (C++ \texttt{std::stable\_sort}), and a reference MergeSort
 uniform random, sorted ascending, sorted descending, band-limited almost-sorted
 permutations, block-cyclic interleave, two-run riffle, social-feed
 fan-in, and partial index merges.
+
+\subsection{Measured \(K\) and Controlled \(K\)-Sensitivity}
+\label{measured-k-and-k-sensitivity}
+
+The measured-\(K\) results make the structural story explicit. Ascending input gives \(K=1\), descending input gives \(K=N\), and the fan-in workloads produce small fixed \(K\). Random inputs produce much larger but still sublinear \(K\), representing the weak-structure regime.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Measured ladder count \(K\) for the main benchmark workloads. Values are means over 10 runs. The table confirms that the benchmark suite spans the intended structural range, from \(K=1\) to \(K\approx N\).}
+\label{tab:measured-k}
+\begin{tabularx}{\linewidth}{@{}lrrrX@{}}
+\toprule
+Workload & \(N=10^6\) & \(N=10^7\) & \(N=10^8\) & Interpretation \\
+\midrule
+Ascending & 1.0 & 1.0 & 1.0 & Single ladder \\
+Two-run riffle & 2.0 & 2.0 & 2.0 & Two interleaved streams \\
+Block-cyclic & 8.0 & 8.0 & 8.0 & Eight producers \\
+Band-limited & 14.9 & 15.9 & 16.6 & Bounded local jitter \\
+Partial index & 16.0 & 16.0 & 16.0 & Small segment fan-in \\
+Social-feed & 24.0 & 24.0 & 24.0 & Multi-source fan-in \\
+Random & 1985.8 & 6302.1 & 19955.1 & Weak structure \\
+Descending & \(10^6\) & \(10^7\) & \(10^8\) & Worst case \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The controlled sweep isolates \(K\) by fixing \(N=10^7\) and varying target \(K\). The randomized exact-\(K\) generator verifies that measured \(K\) equals target \(K\) for every tested value. LadderSort's runtime generally rises with \(K\), which is consistent with the \(O(N\log K)\) analysis.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{media/media/k_sweep_runtime_vs_k.pdf}
+\caption{Controlled \(K\)-sweep at \(N=10^7\) using randomized exact-\(K\) interleavings. Median runtime generally increases with the measured ladder count \(K\), consistent with LadderSort's \(O(N\log K)\) parameterization. TimSort remains strongest at \(K=1\), where the input is already one sorted run.}
+\label{fig:k-sweep-runtime}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{media/media/k_sweep_speedup_vs_k.pdf}
+\caption{Speedup relative to TimSort on the controlled randomized exact-\(K\) sweep. LadderSort and Hybrid LadderSort are strongest in the small-\(K\) interleaved regime, while their advantage narrows as \(K\) grows.}
+\label{fig:k-sweep-speedup}
+\end{figure}
+
+TimSort is fastest at \(K=1\), where the input is a single already sorted run. For small interleaved values of \(K\), LadderSort and Hybrid LadderSort are competitive or faster than TimSort; as \(K\) grows, the advantage narrows. This supports the intended use case: inputs formed by a small number of interleaved ordered streams.
 
 \subsection{\texorpdfstring{\textbf{Uniform Random Inputs}}{Uniform Random Inputs}}\label{uniform-random-inputs}
 
