@@ -428,6 +428,13 @@ We measure \(K\) using the same deterministic tail-guided placement rule as Phas
 
 For the controlled \(K\)-sweep, we generate randomized exact-\(K\) interleavings at \(N=10^7\). The generator creates exactly the target number of ladders while avoiding repeated descending blocks that would favor run-adaptive baselines. We report median time over 10 timed rounds after one warm-up. The raw data and unfiltered summary are retained; the paper figures use a filtered summary that removes extreme \(\texttt{time\_sec} > 10.0\)s outliers caused by system-level paging or background noise. This filtering removed 6 of 400 rows (1.5\%); all correctness checks passed, and all filtered groups retained at least 8 samples.
 
+\subsection{Overhead Measurement Protocol}
+\label{overhead-measurement-protocol}
+
+To evaluate overhead beyond wall-clock time, we measure peak memory and key-comparison counts. Peak memory is measured as maximum resident set size on macOS. The memory experiment uses the random, descending, and social-feed workloads. We run three seeds at \(N=10^7\), and one seed at \(N=10^8\) as a larger stress case.
+
+Comparison counts are measured on smaller inputs because instrumentation changes constant factors. We run \(N=10^5\) and \(N=10^6\) on random, descending, block-cyclic, two-run riffle, and social-feed workloads, using five seeds per configuration. For LadderSort, comparisons are counted inside the hinted placement search, the two-way merge, and the loser-tree merge. For TimSort, \texttt{std::sort}, and \texttt{std::stable\_sort}, we sort wrapped keys using a comparator that increments a counter. Move/write counts are intentionally omitted from this phase to avoid invasive instrumentation; memory and comparison counts are the primary overhead evidence.
+
 \section{\texorpdfstring{\textbf{Results and Discussion}}{Results and Discussion}}\label{results-and-discussion}
 
 This section reports the empirical performance of LadderSort compared
@@ -959,6 +966,53 @@ path and remains faster than TimSort. Thus, Hybrid LadderSort should be viewed
 as a practical guardrail: it protects against high-\(K\) regimes without
 changing the core contribution, which is the raw \(K\)-adaptive decomposition
 and merge.
+
+\subsection{Memory and Comparison Overheads}
+\label{memory-and-comparison-overheads}
+
+The preceding experiments focus primarily on runtime. We also measure peak resident memory and key-comparison counts to separate algorithmic behavior from implementation speed. Table~\ref{tab:phase5-memory} reports peak resident set size at \(N=10^8\), while the full result pack also includes \(N=10^7\) measurements with three seeds. The \(10^8\) rows are reported as a one-seed stress case due to runtime and memory cost.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Peak resident set size at \(N=10^8\), reported in GiB. The \(10^8\) memory experiment uses one seed as a large stress case; \(N=10^7\) measurements use three seeds and are retained in the result pack.}
+\label{tab:phase5-memory}
+\begin{tabularx}{\linewidth}{@{}lrrrrX@{}}
+\toprule
+Dataset & Raw LadderSort & Hybrid LadderSort & TimSort & \texttt{std::sort} & \texttt{std::stable\_sort} \\
+\midrule
+Descending & 3.73 & 1.12 & 1.62 & 1.62 & 1.62 \\
+Random & 1.06 & 1.26 & 1.12 & 0.75 & 0.90 \\
+Social-feed & 1.82 & 1.82 & 0.78 & 0.75 & 1.12 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The memory measurements show the expected tradeoff. Raw LadderSort stores all ladders and merge state, so it can use more memory than in-place or mostly in-place baselines. This is most visible on descending input, where \(K=N\) and raw LadderSort reaches 3.73~GiB at \(N=10^8\). Hybrid LadderSort avoids this high-\(K\) memory blow-up by falling back, reducing the descending case to 1.12~GiB. On social-feed input, where \(K=24\), Hybrid does not fall back and therefore has the same memory footprint as Raw LadderSort. This supports the interpretation of Hybrid LadderSort as a practical guardrail rather than a replacement for the raw \(K\)-adaptive algorithm.
+
+Table~\ref{tab:phase5-comparisons} reports median key comparisons per input element at \(N=10^6\). The table uses five seeds per workload. For LadderSort, the comparison count includes placement-search comparisons and merge comparisons; for TimSort and the C++ baselines, the count comes from a comparator wrapper.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Median key comparisons per element at \(N=10^6\). Lower values indicate fewer key comparisons. Small-\(K\) interleaved workloads require far fewer comparisons for LadderSort than general-purpose baselines.}
+\label{tab:phase5-comparisons}
+\begin{tabularx}{\linewidth}{@{}l r rrrrX@{}}
+\toprule
+Dataset & \(K\) & Raw LadderSort & Hybrid LadderSort & TimSort & \texttt{std::sort} & \texttt{std::stable\_sort} \\
+\midrule
+Two-run riffle & 2 & 2.00 & 2.00 & 4.93 & 20.89 & 18.96 \\
+Block-cyclic & 8 & 4.03 & 4.03 & 6.07 & 23.64 & 25.59 \\
+Social-feed & 24 & 3.83 & 3.83 & 6.16 & 17.01 & 18.95 \\
+Random & 1985 & 21.24 & 27.19 & 18.63 & 22.26 & 29.90 \\
+Descending & \(10^6\) & 22.95 & 3.00 & 1.00 & 3.00 & 37.02 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The comparison counts support the structural interpretation of LadderSort. On two-run riffle, block-cyclic, and social-feed inputs, the measured \(K\) is small and LadderSort performs only about 2--4 comparisons per element. These values are lower than TimSort and much lower than \texttt{std::sort} and \texttt{std::stable\_sort} on the same interleaved workloads. On random input, where the measured \(K\) is much larger, raw LadderSort performs a comparison count comparable to general-purpose sorting. On descending input, raw LadderSort exhibits its high-\(K\) worst case, while Hybrid LadderSort falls back and reduces the comparison count substantially. TimSort remains best on descending input because it detects a single descending run and reverses it.
+
+Together, the memory and comparison experiments clarify the cost of the \(K\)-adaptive design. LadderSort reduces comparisons sharply when the input is a small interleaving of ordered streams, but the ladder representation can require additional memory. Hybrid LadderSort mitigates the high-\(K\) cases by falling back on random and descending inputs while preserving the raw path on small-\(K\) workloads.
 
 \subsection{\texorpdfstring{\textbf{Asymptotic Behavior and Structural Interpretation}}{Asymptotic Behavior and Structural Interpretation}}\label{asymptotic-behavior-and-structural-interpretation}
 
