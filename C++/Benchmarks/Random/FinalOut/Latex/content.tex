@@ -130,7 +130,7 @@ The proposed algorithm is named LadderSort because it inserts each element step-
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\linewidth]{media/media/image1.png}
-\caption{Methodology overview of LadderSort.}
+\caption{Methodology overview of LadderSort, showing that the algorithm first decomposes the input into ladders and then merges them according to the measured ladder count \(K\).}
 \label{fig:overview}
 \end{figure}
 
@@ -471,7 +471,7 @@ The measured-\(K\) results make the structural story explicit. Ascending input g
 \begin{table}[H]
 \centering
 \small
-\caption{Measured ladder count \(K\) for the main benchmark workloads. Values are means over 10 runs. The table confirms that the benchmark suite spans the intended structural range, from \(K=1\) to \(K\approx N\).}
+\caption{Measured ladder count \(K\) for the main benchmark workloads. Entries are mean ladder counts over 10 runs at each input size \(N\), confirming that the suite spans the intended structural range from \(K=1\) to \(K\approx N\).}
 \label{tab:measured-k}
 \begin{tabularx}{\linewidth}{@{}lrrrX@{}}
 \toprule
@@ -494,14 +494,14 @@ The controlled sweep isolates \(K\) by fixing \(N=10^7\) and varying target \(K\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\linewidth]{media/media/k_sweep_runtime_vs_k.pdf}
-\caption{Controlled \(K\)-sweep at \(N=10^7\) using randomized exact-\(K\) interleavings. Median runtime generally increases with the measured ladder count \(K\), consistent with LadderSort's \(O(N\log K)\) parameterization. TimSort remains strongest at \(K=1\), where the input is already one sorted run.}
+\caption{Controlled \(K\)-sweep at \(N=10^7\) using randomized exact-\(K\) interleavings. Median runtime in seconds generally increases with the measured ladder count \(K\), consistent with LadderSort's \(O(N\log K)\) parameterization; TimSort remains strongest at \(K=1\), where the input is already one sorted run.}
 \label{fig:k-sweep-runtime}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\linewidth]{media/media/k_sweep_speedup_vs_k.pdf}
-\caption{Speedup relative to TimSort on the controlled randomized exact-\(K\) sweep. LadderSort and Hybrid LadderSort are strongest in the small-\(K\) interleaved regime, while their advantage narrows as \(K\) grows.}
+\caption{Speedup relative to TimSort on the controlled randomized exact-\(K\) sweep. Values are median runtime ratios with TimSort as the baseline; LadderSort and Hybrid LadderSort are strongest in the small-\(K\) interleaved regime, while their advantage narrows as \(K\) grows.}
 \label{fig:k-sweep-speedup}
 \end{figure}
 
@@ -523,8 +523,9 @@ LadderSort). TimSort has no long runs to exploit and falls back to its
 merge machinery, so it lags on pure random data. Table~1 summarizes the
 timings for random inputs.
 
-Table 1. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for uniform random inputs.
+Table 1. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for uniform random inputs; \texttt{std::sort} is fastest while
+LadderSort remains competitive when little order is present.
 
 \begin{longtable}{@{}lrrr@{}}
 \toprule
@@ -566,8 +567,9 @@ QuickSort still perform partitioning work and remain roughly \(O(N\log N)\).
 StableSort and MergeSort move more data than necessary and are also
 slower than TimSort and LadderSort. Table~2 reports the results.
 
-Table 2. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for sorted ascending inputs.
+Table 2. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for sorted ascending inputs; TimSort has the smallest constant on the
+single-run case while LadderSort remains linear with \(K=1\).
 
 \begin{longtable}{@{}lrrr@{}}
 \toprule
@@ -610,8 +612,9 @@ shows that sorted descending input exposes LadderSort's worst case,
 while TimSort is effectively in its best case due to run detection and
 reversal.
 
-Table 3. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for sorted descending inputs.
+Table 3. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for sorted descending inputs; this is LadderSort's high-\(K\) worst
+case and TimSort's run-reversal best case.
 
 {\small
 \begin{longtable}{@{}lrrr@{}}
@@ -658,8 +661,9 @@ trails LadderSort and often StableSort. Partition-based methods
 (IntroSort and QuickSort) do not exploit the small \(K\) and remain
 \(O(N\log N)\). Table~4 presents the results.
 
-Table 4. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for band-limited, nearly sorted inputs (\(W=32\)).
+Table 4. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for band-limited nearly sorted inputs (\(W=32\)); LadderSort benefits
+from the small effective ladder count induced by bounded local jitter.
 
 {\small
 \begin{longtable}{@{}lrrr@{}}
@@ -704,8 +708,9 @@ stack performs more work. StableSort is competitive but pays extra
 copying. Partition-based methods ignore the small-\(K\) structure and stay
 in \(O(N\log N)\) territory. Table~5 shows the timing results.
 
-Table 5. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for block-cyclic interleave inputs (\(K=8, B=4\)).
+Table 5. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for block-cyclic interleave inputs (\(K=8, B=4\)); LadderSort leads by
+recovering the eight interleaved producer streams.
 
 {\small
 \begin{longtable}{@{}lrrr@{}}
@@ -749,8 +754,9 @@ they perform the appropriate two-way merge work but with more buffer
 traffic. Partition-based methods do not benefit from the small \(K\) and
 remain significantly slower. Table~6 lists the measured times.
 
-Table 6. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for two-run riffle inputs.
+Table 6. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for two-run riffle inputs; LadderSort leads by reducing the workload
+to a \(K=2\) two-way merge.
 
 {\small
 \begin{longtable}{@{}lrrr@{}}
@@ -797,8 +803,9 @@ perform appropriate merge work on tie-heavy inputs. QuickSort and
 IntroSort do not benefit from the small \(K\) or the ties; partitioning
 large equality plateaus is costly. Table~7 gives the timings.
 
-Table 7. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for social-feed fan-in inputs.
+Table 7. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for social-feed fan-in inputs; LadderSort performs strongly on this tie-heavy
+small-\(K\) multi-source workload.
 
 {\small
 \begin{longtable}{@{}lrrr@{}}
@@ -844,8 +851,9 @@ traffic. Partition-based methods do not benefit from ties or small \(K\) and
 spend time partitioning large equality plateaus. Table~8 shows the
 performance.
 
-Table 8. Running time in seconds (mean \(\pm\) standard deviation over 10
-runs) for partial index merge inputs.
+Table 8. Runtime in seconds, reported as mean \(\pm\) standard deviation over
+10 runs, for partial index merge inputs; LadderSort performs strongly by exploiting the
+small fan-in and repeated-key merge structure.
 
 {\small
 \begin{longtable}{@{}lrrr@{}}
@@ -905,7 +913,7 @@ riffle isolates the \(K=2\) merge path.
 \begin{table}[H]
 \centering
 \small
-\caption{Phase 4 ablation results. Entries are median relative time normalized to LadderFull \(=1.00\) for the same workload and input size. Values above 1.00 are slower than LadderFull, while values below 1.00 are faster.}
+\caption{Phase 4 ablation results. Entries are median relative runtimes normalized to LadderFull \(=1.00\) for the same workload and input size; values above 1.00 are slower than LadderFull, and the table shows that hints and loser-tree merging matter most in the \(K>2\) social-feed regime.}
 \label{tab:phase4-ablation}
 \begin{tabularx}{\linewidth}{@{}l X rrr rrr@{}}
 \toprule
@@ -948,7 +956,7 @@ random-input worst cases while preserving the small-\(K\) path.
 \begin{table}[H]
 \centering
 \scriptsize
-\caption{Hybrid LadderSort evaluation. Speedups are based on median runtime. The fallback rate is the fraction of runs in which Hybrid LadderSort switched to its fallback path.}
+\caption{Hybrid LadderSort evaluation. Speedups are median runtime ratios relative to Raw LadderSort and TimSort, and fallback rate is the fraction of runs that switched to the fallback path; the hybrid protects high-\(K\) cases while preserving the small-\(K\) path.}
 \label{tab:phase4-hybrid}
 \begin{tabularx}{\linewidth}{@{}l r r r r X@{}}
 \toprule
@@ -984,7 +992,7 @@ The preceding experiments focus primarily on runtime. We also measure peak resid
 \begin{table}[H]
 \centering
 \small
-\caption{Peak resident set size at \(N=10^8\), reported in GiB. The \(10^8\) memory experiment uses one seed as a large stress case; \(N=10^7\) measurements use three seeds and are retained in the result pack.}
+\caption{Peak resident set size at \(N=10^8\), reported in GiB. The \(10^8\) memory experiment uses one seed as a large stress case, showing that Hybrid reduces the descending high-\(K\) footprint while Raw and Hybrid match on small-\(K\) social-feed input.}
 \label{tab:phase5-memory}
 \begin{tabularx}{\linewidth}{@{}lrrrrX@{}}
 \toprule
@@ -1004,7 +1012,7 @@ Table~\ref{tab:phase5-comparisons} reports median key comparisons per input elem
 \begin{table}[H]
 \centering
 \small
-\caption{Median key comparisons per element at \(N=10^6\). Lower values indicate fewer key comparisons. Small-\(K\) interleaved workloads require far fewer comparisons for LadderSort than general-purpose baselines.}
+\caption{Median key comparisons per input element at \(N=10^6\). Lower values indicate fewer key comparisons per element, and the small-\(K\) interleaved workloads require far fewer comparisons for LadderSort than general-purpose baselines.}
 \label{tab:phase5-comparisons}
 \begin{tabularx}{\linewidth}{@{}l r rrrrX@{}}
 \toprule
@@ -1031,7 +1039,7 @@ The synthetic suite lets us control \(K\), but it does not by itself show that i
 \begin{table}[H]
 \centering
 \small
-\caption{Real-world GH Archive event-trace benchmark. The trace contains 55,364 records from 12,783 repository sources. Times are medians over 10 rounds. Speedup is relative to TimSort.}
+\caption{Real-world GH Archive event-trace benchmark. The trace contains 55,364 records from 12,783 repository sources; times are median seconds over 10 rounds, speedup is relative to TimSort, and the measured \(K=368\) indicates low-\(K\) structure in a public event trace.}
 \label{tab:phase6-real-trace}
 \begin{tabularx}{\linewidth}{@{}lrrrrX@{}}
 \toprule
@@ -1075,10 +1083,10 @@ which is \(\Theta(N)\) when \(K=1\) and \(\Theta(N\log K)\) when \(K\ge 2\). The
 \(K\) term is dominated by \(N\log K\) whenever \(N\ge K\). Table~9 summarizes the
 parametric bounds.
 
-Table 9. Parametric bounds for LadderSort in terms of \(N\) and \(K\).
-
 {\small
 \begin{longtable}{@{}p{0.14\linewidth}p{0.22\linewidth}p{0.18\linewidth}p{0.42\linewidth}@{}}
+\caption{Parametric bounds for LadderSort in terms of input size \(N\) and measured ladder count \(K\). Bounds are asymptotic time or space units, showing that the algorithm is linear for \(K=1\), \(O(N\log K)\) for larger \(K\), and sub-\(N\log N\) whenever \(K\) grows slowly.}
+\label{tab:parametric-bounds}\\
 \toprule
 Notation & Time bound & Valid when & Interpretation \\
 \midrule
@@ -1113,14 +1121,13 @@ These bounds explain the trends observed in the workloads:
 \item Adversarial descending: every element starts a new ladder, \(K=N\), and \(T(N,N)=\Theta(N\log N)\). This matches the worst-case behavior measured on sorted descending inputs.
 \end{itemize}
 
-Table 10 connects representative input families from the experiments to
-typical \(K\) and resulting complexity.
-
-Table 10. Representative inputs, typical \(K\), and resulting complexity for
-LadderSort.
+Table~\ref{tab:representative-input-complexity} connects representative input
+families from the experiments to typical \(K\) and resulting complexity.
 
 {\small
 \begin{longtable}{@{}p{0.30\linewidth}p{0.12\linewidth}p{0.18\linewidth}p{0.36\linewidth}@{}}
+\caption{Representative input families, typical measured ladder count \(K\), and resulting asymptotic time complexity. The table summarizes why LadderSort is linear or near-linear on small-\(K\) interleavings and reaches \(N\log N\) only when \(K\) is large.}
+\label{tab:representative-input-complexity}\\
 \toprule
 Input family (from Results) & Typical \(K\) & Time & Notes \\
 \midrule
