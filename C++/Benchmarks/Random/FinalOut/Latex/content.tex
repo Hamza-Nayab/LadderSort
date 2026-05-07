@@ -109,7 +109,19 @@ Skiena’s \emph{encroaching lists} technique provides both (i) a presortedness 
 
 \subsection{Sequence Decomposition and LIS/LDS Connections}\label{sequence-decomposition}
 
-Patience sorting and chain decomposition provide a structural lens on sequence order. The minimum number of nondecreasing subsequences into which a sequence can be partitioned equals the length of a longest decreasing subsequence (LDS), a corollary of Dilworth's theorem for permutation posets \([10\text{--}12]\). Practical LIS routines maintain an array of pile tops and place each element by binary search in \(O(\log K)\) time, where \(K\) is the number of piles \([10]\). LadderSort borrows this tail-guided placement (augmented with locality-friendly hints and galloping) but, unlike LIS algorithms, retains all subsequences and completes the sort via a final \(K\)-way merge. This ties the algorithmic cost \(O(n\log K)\) directly to a classical structural parameter.
+Classical sequence-decomposition results relate monotone subsequence covers to
+decreasing-subsequence structure: in an offline setting, the minimum number of
+nondecreasing subsequences required to cover a sequence is governed by the
+largest obstruction formed by decreasing subsequences \([10\text{--}12]\).
+Patience sorting and chain-decomposition viewpoints provide useful background
+for this perspective, and practical LIS routines maintain pile tops using
+binary search \([10]\). LadderSort uses this family of ideas only as motivation:
+its decomposition is online, deterministic, and implementation-oriented.
+LadderSort does not compute a minimum chain decomposition offline; it
+constructs a deterministic online decomposition whose cost is governed by the
+resulting \(K\). Thus, the measured \(K\) in this paper is the
+algorithm-dependent number of ladders produced by the LadderSort placement rule,
+not necessarily the global optimum over all possible decompositions.
 
 \subsection{Multiway Merging and Tournament/Loser Trees}\label{multiway-merging}
 
@@ -1111,7 +1123,7 @@ These bounds explain the trends observed in the workloads:
 \begin{itemize}
 \item Best case: already sorted or all keys equal. Here \(K=1\) and \(T(N,1)=\Theta(N)\); this matches the linear behavior seen on sorted ascending inputs.
 \item Small-\(K\) inputs: constant or polylogarithmic \(K\) (for example, block-cyclic, two-run riffle, social-feed fan-in, and partial index merges). In these cases, \(T(N,K)\) is \(\Theta(N)\) or \(\Theta(N\log\log N)\), which is strictly below \(N\log N\); the measurements confirm that LadderSort is faster than partition-based baselines and competitive with or better than merge-based baselines.
-\item Random permutations: for distinct keys, classical patience-sorting theory implies that the minimum number of nondecreasing subsequences equals the length of the longest decreasing subsequence, which is \(\Theta(\sqrt{N})\) in expectation. Thus \(K\approx \Theta(\sqrt{N})\) and the expected running time is about \(\tfrac{1}{2}\Theta(N\log N)\), consistent with LadderSort being competitive but not leading on uniform random inputs.
+\item Random permutations: for distinct keys, classical patience-sorting theory implies that the offline optimum number of nondecreasing subsequences is \(\Theta(\sqrt{N})\) in expectation. The measured \(K\) produced by LadderSort's deterministic placement rule is likewise sublinear in our random workloads, yielding a lower measured merge height than full \(N\log N\) sorting, consistent with LadderSort being competitive but not leading on uniform random inputs.
 \item Adversarial descending: every element starts a new ladder, \(K=N\), and \(T(N,N)=\Theta(N\log N)\). This matches the worst-case behavior measured on sorted descending inputs.
 \end{itemize}
 
