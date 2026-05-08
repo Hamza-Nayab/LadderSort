@@ -452,6 +452,13 @@ This trace is intended to test whether the structural premise of LadderSort appe
 
 \section{\texorpdfstring{\textbf{Results and Discussion}}{Results and Discussion}}\label{results-and-discussion}
 
+This section first reports baseline runtime behavior across the synthetic
+workloads, then connects those results to the measured ladder count \(K\) and
+to a controlled \(K\)-sensitivity sweep. We then isolate implementation choices
+through ablations, evaluate Hybrid LadderSort as a guardrail for high-\(K\)
+inputs, report memory and comparison-count overheads, and finally test one
+public GH Archive event trace.
+
 This section reports the empirical performance of LadderSort compared
 with several baseline sorting algorithms under a range of input
 distributions. For each workload, we sort arrays of 1 million, 10
@@ -515,19 +522,12 @@ TimSort is fastest at \(K=1\), where the input is a single already sorted run. F
 
 \subsection{\texorpdfstring{\textbf{Uniform Random Inputs}}{Uniform Random Inputs}}\label{uniform-random-inputs}
 
-The random generator produces 31-bit uniformly distributed integers with
-duplicates possible but rare at these scales, so there is essentially no
-exploitable order. All methods exhibit \(O(N\log N)\) behavior.
-
-As expected, IntroSort (\texttt{std::sort}) is fastest on this workload due to
-efficient in-place partitioning and good pivot selection. LadderSort
-remains competitive but does not lead; with little structure to exploit,
-Phase~1 generates many subsequences and the \(O(\log K)\) placement and merge
-overhead becomes visible. StableSort and MergeSort move more data
-because of merging and therefore typically trail IntroSort (and often
-LadderSort). TimSort has no long runs to exploit and falls back to its
-merge machinery, so it lags on pure random data. Table~1 summarizes the
-timings for random inputs.
+The random generator produces 31-bit uniformly distributed integers, with
+duplicates possible but rare. This is the weak-structure regime: measured \(K\)
+is large compared with the fan-in workloads, and no long contiguous runs are
+available. Table~1 shows that \texttt{std::sort} is fastest, while LadderSort is
+competitive but not the main winner because placement and merge overhead remain
+visible when there is little interleaved order to exploit.
 
 Table 1. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for uniform random inputs; \texttt{std::sort} is fastest while
@@ -560,18 +560,11 @@ MergeSort & 0.067966 (\(\pm\)0.000106) & 0.775633 (\(\pm\)0.001740) & 9.244554 (
 
 \subsection{\texorpdfstring{\textbf{Sorted Ascending Inputs}}{Sorted Ascending Inputs}}\label{sorted-ascending-inputs}
 
-The sorted ascending generator returns an already sorted array,
-essentially one long monotone run. Algorithms that detect and exploit
-existing order are favored.
-
-TimSort is the clear winner here: it detects a single run and finishes
-in linear time with a very small constant factor. LadderSort is also
-linear: Phase~1 places all elements into a single ladder (\(K=1\)) and
-Phase~2 returns it directly. However, LadderSort pays some bookkeeping
-and copy overhead, so it trails TimSort on this input. IntroSort and
-QuickSort still perform partitioning work and remain roughly \(O(N\log N)\).
-StableSort and MergeSort move more data than necessary and are also
-slower than TimSort and LadderSort. Table~2 reports the results.
+Sorted ascending input is the \(K=1\) case for LadderSort and a single natural
+run for TimSort. Table~2 shows that TimSort has the smallest constant on this
+input, while LadderSort is also linear but pays additional bookkeeping and copy
+overhead. Partition-based and general merge-based baselines do not exploit the
+single-run structure as directly.
 
 Table 2. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for sorted ascending inputs; TimSort has the smallest constant on the
@@ -604,19 +597,11 @@ MergeSort & 0.006461 (\(\pm\)0.000016) & 0.085276 (\(\pm\)0.002955) & 1.008359 (
 
 \subsection{\texorpdfstring{\textbf{Sorted Descending Inputs}}{Sorted Descending Inputs}}\label{sorted-descending-inputs}
 
-The sorted descending generator produces a strictly descending array,
-which is the adversarial edge case for LadderSort. Each new element is
-smaller than all current tails, so Phase~1 creates a new ladder for
-almost every element (\(K \approx N\)). The final \(K\)-way merge then costs
-\(O(N\log N)\) with a large constant factor.
-
-TimSort, by contrast, treats a descending sequence as a single run and
-reverses it, resulting in linear time with a small constant. IntroSort
-and QuickSort remain \(O(N\log N)\) but maintain good performance due to
-robust pivoting. StableSort and MergeSort also perform well. Table~3
-shows that sorted descending input exposes LadderSort's worst case,
-while TimSort is effectively in its best case due to run detection and
-reversal.
+Sorted descending input is the adversarial edge case for raw LadderSort:
+Phase~1 creates nearly one ladder per element, so \(K\approx N\). Table~3 shows
+this high-\(K\) worst case. TimSort is effectively in a best-case regime because
+it detects the descending run and reverses it, while the in-place baselines also
+avoid the large \(K\)-way merge overhead.
 
 Table 3. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for sorted descending inputs; this is LadderSort's high-\(K\) worst
@@ -651,21 +636,12 @@ MergeSort & 0.009635 (\(\pm\)0.000030) & 0.108443 (\(\pm\)0.002083) & 1.279382 (
 
 \subsection{\texorpdfstring{\textbf{Nearly Sorted Inputs with Bounded Local Jitter}}{Nearly Sorted Inputs with Bounded Local Jitter}}\label{nearly-sorted-inputs-with-bounded-local-jitter}
 
-In the band-limited permutation workload, we start from the sorted
-sequence \(1,\ldots,N\) and shuffle only within windows of size \(W+1\)
-(here \(W=32\)). No element moves more than 32 positions. This keeps the
-number of nondecreasing subsequences effectively small (\(K \approx W+1\)),
-which is where LadderSort's \(O(N\log K)\) behavior is advantageous.
-
-In Phase~1, LadderSort quickly finds the correct ladder using its hinted
-search; in Phase~2, it merges only a few ladders, not hundreds or
-thousands. The measurements show that LadderSort is fastest across
-sizes, with StableSort close behind due to cache-friendly sequential
-merges. TimSort benefits from local order but cannot rely on a single
-long run; its stack of short runs induces more merging work, so it
-trails LadderSort and often StableSort. Partition-based methods
-(IntroSort and QuickSort) do not exploit the small \(K\) and remain
-\(O(N\log N)\). Table~4 presents the results.
+The band-limited permutation workload shuffles the sorted sequence only within
+windows of size \(W+1\) (\(W=32\)), so no element moves far from its original
+position and the effective ladder count stays small. Table~4 shows that
+LadderSort benefits from this small-\(K\) structure, with StableSort close on
+some sizes. TimSort uses local order but still observes many short runs, and
+partition-based methods do not exploit the bounded-displacement structure.
 
 Table 4. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for band-limited nearly sorted inputs (\(W=32\)); LadderSort benefits
@@ -700,19 +676,11 @@ MergeSort & 0.023829 (\(\pm\)0.000098) & 0.234845 (\(\pm\)0.001104) & 2.684934 (
 
 \subsection{\texorpdfstring{\textbf{Block-Cyclic Interleave}}{Block-Cyclic Interleave}}\label{block-cyclic-interleave}
 
-The block-cyclic interleave workload models bursty fan-in from a few
-already sorted producers. Here \(K=8\) sources emit small sorted blocks of
-size \(B=4\) in round-robin order, so the global sequence is a weave of
-eight monotone subsequences.
-
-LadderSort aligns almost perfectly with this structure. Phase~1 assigns
-each element to one of approximately \(K\) ladders using the hinted search,
-and Phase~2 performs a light \(K\)-way merge. As a result, LadderSort is
-fastest across all sizes. TimSort benefits from local sortedness but
-observes many short runs rather than a single long run, so its merge
-stack performs more work. StableSort is competitive but pays extra
-copying. Partition-based methods ignore the small-\(K\) structure and stay
-in \(O(N\log N)\) territory. Table~5 shows the timing results.
+The block-cyclic workload interleaves \(K=8\) sorted producers emitting blocks
+of size \(B=4\). This is a direct small-\(K\) fan-in pattern, and Table~5 shows
+that LadderSort performs best across the tested sizes. TimSort observes local
+sortedness but many short runs, StableSort remains competitive with extra copy
+traffic, and partition-based methods do not use the producer structure.
 
 Table 5. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for block-cyclic interleave inputs (\(K=8, B=4\)); LadderSort leads by
@@ -747,18 +715,12 @@ MergeSort & 0.011499 (\(\pm\)0.000085) & 0.128904 (\(\pm\)0.000871) & 1.565909 (
 
 \subsection{\texorpdfstring{\textbf{Two-Run Riffle}}{Two-Run Riffle}}\label{two-run-riffle}
 
-The two-run riffle workload interleaves two already sorted halves by
-coin flip, so the data effectively decomposes into about two monotone
-subsequences (\(K \approx 2\)).
-
-LadderSort is well matched to this pattern. Phase~1 reconstructs the two
-ladders, and Phase~2 reduces them via a single two-way galloping merge.
-LadderSort therefore leads at all sizes. TimSort comes next; the
-frequent alternation prevents it from exploiting a single long run and
-increases merge bookkeeping. StableSort and MergeSort are close because
-they perform the appropriate two-way merge work but with more buffer
-traffic. Partition-based methods do not benefit from the small \(K\) and
-remain significantly slower. Table~6 lists the measured times.
+The two-run riffle workload interleaves two sorted halves, giving
+\(K\approx 2\). Table~6 shows LadderSort's advantage in this setting: after
+reconstructing the two ladders, it reduces the problem to one two-way merge.
+TimSort is next, while StableSort and MergeSort perform related merge work with
+more buffer traffic. Partition-based methods do not benefit from the small
+ladder count.
 
 Table 6. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for two-run riffle inputs; LadderSort leads by reducing the workload
@@ -793,21 +755,12 @@ MergeSort & 0.014821 (\(\pm\)0.000096) & 0.161039 (\(\pm\)0.001319) & 1.927994 (
 
 \subsection{\texorpdfstring{\textbf{Social-Feed Fan-In}}{Social-Feed Fan-In}}\label{social-feed-fan-in}
 
-The social-feed fan-in workload approximates a per-user feed where
-10--40 followees emit in sticky bursts. Timestamps often repeat and
-advance only by small increments, producing a small number of ladders
-(small \(K\)) and large tie plateaus. This is essentially a streaming \(K\)-way
-merge problem.
-
-LadderSort matches this shape closely. Phase~1 reconstructs the
-per-source ladders, and the \(K\)-way loser-tree merge in Phase~2 outputs
-the global minimum using a deterministic tie-breaking rule. LadderSort therefore
-leads across sizes. TimSort benefits from local runs but pays more
-overhead for run detection and frequent merges. StableSort tracks
-LadderSort within about 20--40\%, and MergeSort follows behind, as both
-perform appropriate merge work on tie-heavy inputs. QuickSort and
-IntroSort do not benefit from the small \(K\) or the ties; partitioning
-large equality plateaus is costly. Table~7 gives the timings.
+The social-feed workload models sticky bursts from 10--40 producers, with many
+repeated timestamps and a small measured \(K\). Table~7 shows that LadderSort
+performs strongly on this tie-heavy fan-in pattern because it reconstructs the
+per-source ladders and uses deterministic tie-breaking during merge. TimSort and
+merge-based baselines benefit from local order, while partitioning large
+equality plateaus is less favorable.
 
 Table 7. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for social-feed fan-in inputs; LadderSort performs strongly on this tie-heavy
@@ -842,20 +795,12 @@ MergeSort & 0.013936 (\(\pm\)0.000139) & 0.155518 (\(\pm\)0.000805) & 1.863321 (
 
 \subsection{\texorpdfstring{\textbf{Partial Index Merges}}{Partial Index Merges}}\label{partial-index-merges}
 
-The partial index merge workload models merging a handful of hot
-posting-list segments whose docID ranges overlap. Many equal keys appear
-across segments, and items arrive in short bursts. This is again a
-small-\(K\) streaming merge.
-
-LadderSort is well aligned with this structure. Phase~1 recovers the
-per-segment ladders, and the \(K\)-way loser tree in Phase~2 streams the
-global minimum using a deterministic tie-breaking rule. LadderSort leads across
-sizes. TimSort is the next best method: it benefits from local runs but
-pays more for run detection and repeated merges. StableSort and
-MergeSort remain reasonably close but suffer from heavier buffer
-traffic. Partition-based methods do not benefit from ties or small \(K\) and
-spend time partitioning large equality plateaus. Table~8 shows the
-performance.
+The partial-index workload merges hot posting-list segments with overlapping
+docID ranges, repeated keys, and short bursts. This again yields a small-\(K\)
+merge-shaped input. Table~8 shows that LadderSort performs strongly by
+recovering the segment ladders and using its loser-tree merge. TimSort and
+merge-based baselines remain reasonable, while partition-based methods gain
+less from the repeated-key structure.
 
 Table 8. Runtime in seconds, reported as mean \(\pm\) standard deviation over
 10 runs, for partial index merge inputs; LadderSort performs strongly by exploiting the
