@@ -11,6 +11,7 @@
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{graphicx}
+\usepackage{tikz}
 \usepackage{float}
 \usepackage{longtable,booktabs,array,tabularx}
 \usepackage{calc}
@@ -135,8 +136,63 @@ The proposed algorithm is named LadderSort because it inserts each element step-
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{media/media/image1.png}
-\caption{Methodology overview of LadderSort, showing that the algorithm first decomposes the input into ladders and then merges them according to the measured ladder count \(K\).}
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  panel/.style={draw, rounded corners=2pt, line width=0.45pt,
+    minimum width=4.7cm, minimum height=4.1cm, anchor=north west},
+  token/.style={draw, rounded corners=1pt, minimum width=0.62cm,
+    minimum height=0.38cm, inner sep=1pt, font=\scriptsize},
+  stream/.style={draw, rounded corners=1pt, minimum width=0.78cm,
+    minimum height=0.38cm, inner sep=1pt, font=\scriptsize},
+  arrow/.style={->, line width=0.55pt},
+  title/.style={font=\bfseries\small},
+  note/.style={font=\scriptsize, align=center},
+  every node/.style={font=\small}
+]
+\node[panel] (a) at (0,0) {};
+\node[panel] (b) at (5.25,0) {};
+\node[panel] (c) at (10.5,0) {};
+
+\node[title] at (2.35,-0.35) {(a) interleaved input streams};
+\node[title] at (7.60,-0.35) {(b) ladder decomposition};
+\node[title] at (12.85,-0.35) {(c) adaptive merge};
+
+\node[stream] at (0.70,-1.05) {\(3_A\)};
+\node[stream] at (1.45,-1.05) {\(7_A\)};
+\node[stream,dashed] at (2.20,-1.05) {\(2_B\)};
+\node[stream,dashed] at (2.95,-1.05) {\(5_B\)};
+\node[stream,dotted] at (3.70,-1.05) {\(4_C\)};
+\node[stream,dotted] at (4.45,-1.05) {\(8_C\)};
+\node[note] at (2.35,-1.75) {locally ordered producers\\appear noncontiguously};
+\draw[arrow] (0.85,-2.45) -- (1.65,-2.45);
+\draw[arrow,dashed] (2.05,-2.45) -- (2.85,-2.45);
+\draw[arrow,dotted] (3.25,-2.45) -- (4.05,-2.45);
+\node[note] at (2.35,-3.05) {not just contiguous natural runs};
+
+\node[token] at (6.00,-1.05) {\(L_1\)};
+\node[anchor=west, font=\scriptsize] at (6.45,-1.05) {\(2,5,\ldots\)};
+\node[token] at (6.00,-1.70) {\(L_2\)};
+\node[anchor=west, font=\scriptsize] at (6.45,-1.70) {\(3,7,\ldots\)};
+\node[token] at (6.00,-2.35) {\(L_3\)};
+\node[anchor=west, font=\scriptsize] at (6.45,-2.35) {\(4,8,\ldots\)};
+\node[anchor=west, font=\scriptsize] at (6.00,-3.05) {\(\vdots\quad L_K\)};
+\node[note] at (7.60,-3.55) {single scan assigns each key\\to the leftmost feasible ladder};
+
+\node[token] at (11.05,-1.30) {\(L_1\)};
+\node[token] at (11.05,-1.95) {\(L_2\)};
+\node[token] at (11.05,-2.60) {\(L_K\)};
+\node[draw, rounded corners=2pt, minimum width=1.35cm, minimum height=0.68cm,
+  font=\scriptsize, align=center] (merge) at (12.45,-1.95) {\(K\)-way\\merge};
+\node[draw, rounded corners=1pt, minimum width=1.55cm, minimum height=0.48cm,
+  font=\scriptsize] (out) at (14.35,-1.95) {sorted output};
+\draw[arrow] (11.45,-1.30) -- (merge.west);
+\draw[arrow] (11.45,-1.95) -- (merge.west);
+\draw[arrow] (11.45,-2.60) -- (merge.west);
+\draw[arrow] (merge.east) -- (out.west);
+\node[note] at (12.85,-3.25) {cost governed by measured \(K\)\\\(O(N\log K)\)};
+\end{tikzpicture}%
+}
+\caption{LadderSort targets inputs that are not necessarily organized as contiguous runs. It decomposes an interleaved sequence into nondecreasing ladders and merges those ladders, making the cost depend on the measured ladder count \(K\).}
 \label{fig:overview}
 \end{figure}
 
