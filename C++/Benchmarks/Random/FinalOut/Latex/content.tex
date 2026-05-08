@@ -68,7 +68,7 @@ Many data-processing workloads produce sequences that are not globally sorted bu
 
 \section{Introduction}
 
-Sorting is a fundamental primitive in computing systems, underpinning database operators, stream-processing pipelines, search indexing, analytics, and online services. Classical comparison-based algorithms provide robust worst-case guarantees, but their performance is usually characterized by \(\Theta(N\log N)\) even when the input contains latent order. Practical sorting libraries therefore incorporate adaptivity. TimSort, for example, detects contiguous monotone runs and merges them using carefully engineered policies. This form of adaptivity is highly effective when order appears as long adjacent segments, but it is less directly matched to workloads where order is present but noncontiguous.
+Sorting is a fundamental primitive in computing systems, underpinning database operators, stream-processing pipelines, search indexing, analytics, and online services. Classical comparison-based algorithms provide robust worst-case guarantees, but for an input of length \(N\), their performance is usually characterized by \(\Theta(N\log N)\) even when the input contains latent order. Practical sorting libraries therefore incorporate adaptivity. TimSort, for example, detects contiguous monotone runs and merges them using carefully engineered policies. This form of adaptivity is highly effective when order appears as long adjacent segments, but it is less directly matched to workloads where order is present but noncontiguous.
 
 In many modern systems, data arrives as a fan-in of locally ordered producers. Social feeds combine events from multiple accounts, telemetry systems merge timestamped records from distributed devices, market-data systems aggregate venue-specific streams, and search systems merge partial posting-list segments. In such settings, each producer may emit a locally nondecreasing stream, while the observed global sequence is a bursty interleaving of those streams. The resulting input can contain many short contiguous runs even though it is structurally close to an interleaving of only \(K\) nondecreasing subsequences. We use \(K\) to denote the measured number of ladders produced by the decomposition used in this paper.
 
@@ -463,7 +463,12 @@ Therefore the returned sequence $S$ is a key-sorted permutation of $A$.
 \subsection{\texorpdfstring{\textbf{Flowchart of
 LadderSort:}}{Flowchart of LadderSort:}}\label{flowchart-of-laddersort}
 
-\includegraphics[width=6.41013in,height=7.73794in]{media/media/image2.jpg}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{media/media/image2.jpg}
+\caption{Implementation flowchart of LadderSort. The diagram summarizes the decomposition and merge control flow after the conceptual overview in Figure~\ref{fig:overview}.}
+\label{fig:laddersort-flowchart}
+\end{figure}
 \section{Experimental Setup}\label{experimental-setup}
 
 All experiments were executed on a 2020 MacBook Air featuring an Apple M1 8-core CPU and 8 GB of unified memory, running macOS 15.6.1. Implementations were compiled using Homebrew GCC 15 with C++20 and the following flags:
