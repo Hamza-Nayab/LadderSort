@@ -90,7 +90,7 @@ We also evaluate \emph{Hybrid LadderSort}, a practical extension that monitors \
 
 \subsection{General-Purpose Comparison Sorts}\label{general-purpose-comparison-sorts}
 
-Textbook comparison-based sorting algorithms such as mergesort, quicksort, heapsort, and their hybrids (for example introsort, pattern-defeating quicksort, and BlockQuicksort) target robust worst-case guarantees and good constants on a wide range of inputs, but they do not explicitly parameterize cost by latent order beyond simple pivot or run heuristics \([1,15\text{--}17]\). Pattern-defeating quicksort strengthens introsort's defenses against adversarial patterns and small-distinct-key cases, while BlockQuicksort reduces branch mispredictions using blocked partitioning \([15,16]\).
+Textbook comparison-based sorting algorithms such as mergesort, quicksort, heapsort, and their hybrids (for example introsort, pattern-defeating quicksort, and BlockQuicksort) target robust worst-case guarantees and good constants on a wide range of inputs, but they do not explicitly parameterize cost by latent order beyond simple pivot or run heuristics \([1,14,15]\). Pattern-defeating quicksort strengthens introsort's defenses against adversarial patterns and small-distinct-key cases, while BlockQuicksort reduces branch mispredictions using blocked partitioning \([14,15]\).
 
 A classic “best-of-both-worlds” alternative is \emph{Smoothsort} (Dijkstra), an in-place heapsort variant that achieves \(O(n)\) time on already sorted inputs while preserving \(O(n\log n)\) worst-case behavior \([2]\). Smoothsort is adaptive in the sense of speeding up on presorted data, but it does not explicitly exploit the case where the input is an interleaving of a small number of sorted streams (small \(K\)), which is the target regime for LadderSort.
 
@@ -126,7 +126,7 @@ not necessarily the global optimum over all possible decompositions.
 
 \subsection{Multiway Merging and Tournament/Loser Trees}\label{multiway-merging}
 
-Tournament trees and their loser-tree variant are classical data structures for multiway merging. They support \(K\)-way merge in \(O(\log K)\) per extract after \(O(K)\) build time and are widely used in external-memory and streaming contexts \([1,13,14,17]\).
+Tournament trees and their loser-tree variant are classical data structures for multiway merging. They support \(K\)-way merge in \(O(\log K)\) per extract after \(O(K)\) build time and are widely used in external-memory and streaming contexts \([1,13]\).
 
 \section{Materials and Methods}\label{materials-and-methods}
 
@@ -500,7 +500,7 @@ Comparison counts are measured on smaller inputs because instrumentation changes
 \subsection{Real-World Trace Protocol}
 \label{real-trace-protocol}
 
-To complement the synthetic workloads, we evaluate one public real-world event trace derived from GH Archive. GH Archive records the public GitHub event timeline and provides hourly JSON archives. We use eight hourly archives from 2015-01-01 at 0, 3, 6, 9, 12, 15, 18, and 21 UTC.
+To complement the synthetic workloads, we evaluate one public real-world event trace derived from GH Archive \([16]\). GH Archive records the public GitHub event timeline and provides hourly JSON archives. We use eight hourly archives from 2015-01-01 at 0, 3, 6, 9, 12, 15, 18, and 21 UTC.
 
 Each event provides a timestamp and repository metadata. We use \texttt{created\_at} as the sortable key and \texttt{repo.id} as the source identifier when available, falling back to \texttt{repo.name}. We drop rows missing either field, keep sources with at least two events, sort events within each source by timestamp, and then build a deterministic sticky-burst interleaving of the source streams. This preserves local timestamp order inside each repository stream while avoiding a globally sorted input. The resulting trace contains 55,364 records from 12,783 sources.
 
@@ -1315,18 +1315,12 @@ many real-world data streams, offering a simple, deterministic alternative that 
 
 {[}12{]} Aldous, D.; Diaconis, P. Longest Increasing Subsequences: From Patience Sorting to the Baik--Deift--Johansson Theorem. \emph{Bull. Am. Math. Soc.} 1999, 36, 413--432.
 
-{[}13{]} K-way Merge Algorithm. Wikipedia. Available online: \url{https://en.wikipedia.org/wiki/K-way_merge_algorithm} (accessed on October 2025).
+{[}13{]} Polyntsov, M.; Grigorev, V.; Smirnov, K.; Chernishev, G. Implementing the Comparison-Based External Sort. arXiv 2022, arXiv:2207.12713.
 
-{[}14{]} Polyntsov, M.; Grigorev, V.; Smirnov, K.; Chernishev, G. Implementing the Comparison-Based External Sort. arXiv 2022, arXiv:2207.12713.
+{[}14{]} Edelkamp, S.; Weiß, A. BlockQuicksort: Avoiding Branch Mispredictions in Quicksort. In \emph{Proceedings of ESA 2016}; LIPIcs, Volume 57; pp. 38:1--38:16.
 
-{[}15{]} Edelkamp, S.; Weiß, A. BlockQuicksort: Avoiding Branch Mispredictions in Quicksort. In \emph{Proceedings of ESA 2016}; LIPIcs, Volume 57; pp. 38:1--38:16.
+{[}15{]} Peters, O.R.L. Pattern-Defeating Quicksort. arXiv 2021, arXiv:2106.05123.
 
-{[}16{]} Peters, O.R.L. Pattern-Defeating Quicksort. arXiv 2021, arXiv:2106.05123.
-
-{[}17{]} Knuth, D.E. \emph{The Art of Computer Programming; Volume 3: Sorting and Searching}; 2nd ed.; Addison-Wesley: Reading, MA, USA, 1998; Sections 5.4--5.5.
-
-{[}18{]} Edelkamp, S.; Elmasry, A.; Katajainen, J. Adaptive Heapsort: Source Code. Department of Computer Science, University of Copenhagen, Technical Report (CPH STL Report 2011-1), 2012.
-
-{[}19{]} Vitter, J.S. External Memory Algorithms and Data Structures: Dealing with MASSIVE Data. \emph{ACM Computing Surveys}, 2001.
+{[}16{]} GH Archive. Public GitHub Timeline Archive. Available online: \url{https://www.gharchive.org/} (accessed on 7 May 2026).
 
 \end{document}
