@@ -1,7 +1,9 @@
 \PassOptionsToPackage{unicode}{hyperref}
 \PassOptionsToPackage{hyphens}{url}
 
-\documentclass{article}
+\documentclass[10pt]{article}
+
+\usepackage[margin=0.8in]{geometry}
 
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
@@ -23,6 +25,11 @@
 \urlstyle{same}
 \setcounter{secnumdepth}{3}
 \setlength{\emergencystretch}{3em}
+\setlength{\parskip}{0pt}
+\setlength{\parindent}{1em}
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
 % --- Fix unicode chars that break pdfLaTeX (arXiv-friendly) ---
 \usepackage{newunicodechar}
 \newunicodechar{≤}{$\le$}
@@ -64,7 +71,7 @@ Many data-processing workloads produce sequences that are not globally sorted bu
 
 \noindent\textbf{Keywords:} adaptive sorting; nondecreasing subsequences; multiway merge; loser tree; presortedness; streaming data; performance evaluation
 
-\newpage
+\clearpage
 
 \section{Introduction}
 
@@ -86,53 +93,35 @@ We also evaluate \emph{Hybrid LadderSort}, a practical extension that monitors \
 \item We provide a reproducible experimental evaluation covering synthetic workloads, a controlled \(K\)-sweep, ablations, hybrid behavior, memory and comparison overheads, and one real GH Archive event trace.
 \end{itemize}
 
+\clearpage
+
 \section{Related Work}\label{related-work}
 
 \subsection{General-Purpose Comparison Sorts}\label{general-purpose-comparison-sorts}
 
-Textbook comparison-based sorting algorithms such as mergesort, quicksort, heapsort, and their hybrids (for example introsort, pattern-defeating quicksort, and BlockQuicksort) target robust worst-case guarantees and good constants on a wide range of inputs, but they do not explicitly parameterize cost by latent order beyond simple pivot or run heuristics \([1,14,15]\). Pattern-defeating quicksort strengthens introsort's defenses against adversarial patterns and small-distinct-key cases, while BlockQuicksort reduces branch mispredictions using blocked partitioning \([14,15]\).
-
-A classic “best-of-both-worlds” alternative is \emph{Smoothsort} (Dijkstra), an in-place heapsort variant that achieves \(O(n)\) time on already sorted inputs while preserving \(O(n\log n)\) worst-case behavior \([2]\). Smoothsort is adaptive in the sense of speeding up on presorted data, but it does not explicitly exploit the case where the input is an interleaving of a small number of sorted streams (small \(K\)), which is the target regime for LadderSort.
+Classical comparison sorts and their hybrids, including introsort, pattern-defeating quicksort, and BlockQuicksort, provide strong worst-case or practical performance but do not parameterize cost by noncontiguous latent order \([1,14,15]\). Smoothsort is adaptive on already sorted input while preserving \(O(n\log n)\) worst-case time \([2]\), but it does not target interleavings of a small number of sorted streams.
 
 \subsection{Run-Adaptive Natural Merges}\label{run-adaptive-natural-merges}
 
-A large body of work exploits contiguous monotone runs discovered during a left-to-right scan (natural mergesort). TimSort is the most widely deployed variant; it detects ascending or descending runs, applies galloping, and controls merge order via stack invariants. Formal analyses bound its complexity by \(O(n\log n)\) in the worst case and \(O(n\log \rho)\) as a function of the number of runs \(\rho\) \([3]\).
-
-\paragraph{Merge policies (PowerSort and variants).}
-Subsequent work has improved merge scheduling---the policy that decides which runs to merge and when. PowerSort (and its multiway extension) selects near-optimal merge orders with negligible overhead and has influenced industrial implementations (including CPython’s list sort) \([4,5]\). AdaptiveShiversSort proposes alternative policies with \(nH + O(n)\) style bounds, where \(H\) is an entropy measure over run lengths \([6]\). These designs adapt to contiguous order: when inputs alternate frequently (large \(\rho\)) but consist of only a few nondecreasing subsequences, they can still observe many short runs and incur extra merge-scheduling overhead. LadderSort is complementary: it adapts to a noncontiguous fan-in parameter (\(K\)) rather than to the run count \(\rho\).
+Natural mergesorts exploit contiguous monotone runs. TimSort detects ascending or descending runs, uses galloping, and has worst-case \(O(n\log n)\) behavior with adaptivity to the number of runs \(\rho\) \([3]\). PowerSort, Multiway PowerSort, and AdaptiveShiversSort improve merge scheduling for such run-adaptive settings \([4\text{--}6]\). LadderSort is complementary: it adapts to noncontiguous ladders \(K\), not to contiguous runs \(\rho\).
 
 \subsection{Measures of Presortedness and Adaptive Sorting}\label{measures-of-presortedness}
 
-Classical adaptive-sorting theory studies algorithmic cost as a function of disorder measures such as runs, inversions, oscillations, exchanges, and entropy. Foundational results formalize axioms for such measures and provide lower bounds and algorithms that are optimal with respect to specific measures \([7,8]\).
-
-\paragraph{Encroaching lists.}
-Skiena’s \emph{encroaching lists} technique provides both (i) a presortedness measure and (ii) a practical way to build a small family of monotone subsequences by inserting each element into one of two ends of existing lists \([9]\). This is closely related in spirit to LadderSort’s Phase~1: both construct multiple monotone subsequences that summarize latent order beyond contiguous runs. The key distinction is that LadderSort uses a deterministic tail-guided placement rule aligned with the leftmost feasible ladder (Definition~3) and then explicitly performs an adaptive multiway merge whose cost scales as \(O(n\log K)\).
+Adaptive-sorting theory relates running time to disorder measures such as runs, inversions, oscillations, exchanges, and entropy \([7,8]\). Skiena's encroaching lists are especially close in spirit: they build monotone subsequences as a presortedness measure \([9]\). LadderSort uses a simpler tail-guided placement rule and then merges the resulting ladders explicitly.
 
 \subsection{Sequence Decomposition and LIS/LDS Connections}\label{sequence-decomposition}
 
-Classical sequence-decomposition results relate monotone subsequence covers to
-decreasing-subsequence structure: in an offline setting, the minimum number of
-nondecreasing subsequences required to cover a sequence is governed by the
-largest obstruction formed by decreasing subsequences \([10\text{--}12]\).
-Patience sorting and chain-decomposition viewpoints provide useful background
-for this perspective, and practical LIS routines maintain pile tops using
-binary search \([10]\). LadderSort uses this family of ideas only as motivation:
-its decomposition is online, deterministic, and implementation-oriented.
-LadderSort does not compute a minimum chain decomposition offline; it
-constructs a deterministic online decomposition whose cost is governed by the
-resulting \(K\). Thus, the measured \(K\) in this paper is the
-algorithm-dependent number of ladders produced by the LadderSort placement rule,
-not necessarily the global optimum over all possible decompositions.
+Classical decomposition results connect monotone subsequence covers with decreasing-subsequence structure; in the offline setting, patience sorting and chain-decomposition views give the relevant background \([10\text{--}12]\). LadderSort uses these ideas only as motivation. It does not compute a minimum chain decomposition offline; it constructs a deterministic online decomposition whose cost is governed by the resulting measured \(K\).
 
 \subsection{Multiway Merging and Tournament/Loser Trees}\label{multiway-merging}
 
-Tournament trees and their loser-tree variant are classical data structures for multiway merging. They support \(K\)-way merge in \(O(\log K)\) per extract after \(O(K)\) build time and are widely used in external-memory and streaming contexts \([1,13]\).
+Tournament trees and loser trees are standard tools for \(K\)-way merging, with \(O(K)\) build time and \(O(\log K)\) work per extracted element \([1,13]\). LadderSort uses this classical merge primitive after constructing its ladders.
 
 \section{Materials and Methods}\label{materials-and-methods}
 
 \subsection{Methodology Overview}\label{methodology-overview}
 
-The proposed algorithm is named LadderSort because it inserts each element step-by-step into an assigned subsequence (a \emph{ladder}). It operates in two phases: decomposition into ladders, followed by an adaptive merge.
+LadderSort has two phases: a single scan that decomposes the input into nondecreasing ladders, followed by a merge chosen from the measured ladder count \(K\).
 
 \begin{figure}[H]
 \centering
@@ -192,67 +181,53 @@ The proposed algorithm is named LadderSort because it inserts each element step-
 \node[note] at (12.85,-3.25) {cost governed by measured \(K\)\\\(O(N\log K)\)};
 \end{tikzpicture}%
 }
-\caption{LadderSort targets inputs that are not necessarily organized as contiguous runs. It decomposes an interleaved sequence into nondecreasing ladders and merges those ladders, making the cost depend on the measured ladder count \(K\).}
+\caption{LadderSort decomposes noncontiguous ordered streams into ladders and merges them with cost governed by measured \(K\).}
 \label{fig:overview}
 \end{figure}
 
 \subsection{Two-Phase Description}\label{two-phase}
 
 \paragraph{Phase 1 (decomposition).}
-As the input array is traversed from left to right, elements are grouped into nondecreasing subsequences (ladders). For each ladder, the last element is its \emph{tail}. All tails are stored in a separate array \texttt{tops}, kept in nonincreasing order. When processing a new element \(x\), the algorithm searches \texttt{tops} using an initial galloping step to bound the search interval, then binary search to locate the first tail \(\le x\). If \(x\) is smaller than all tails, a new ladder is created. This produces multiple sorted subsequences.
+The scan appends each key \(x\) to the leftmost ladder whose tail is \(\le x\); if none exists, it creates a new ladder. The tail array \texttt{tops} is maintained in nonincreasing order and searched with a local hint, galloping, and binary search.
 
 \paragraph{Phase 2 (merge).}
-Once all ladders have been created, the number \(K\) determines the merge strategy. If \(K=1\), the ladder is returned directly. If \(K=2\), a two-way merge with galloping is used. If \(K>2\), a \(K\)-way merge based on a loser tree is used. This design adapts to \(K\), achieving best-case time \(O(N)\) when the input is already sorted and worst-case time \(O(N\log N)\) when \(K\) is on the order of \(N\).
+The merge phase returns the ladder directly for \(K=1\), uses a two-way galloping merge for \(K=2\), and uses a loser-tree \(K\)-way merge for \(K>2\). Thus the merge height is controlled by \(K\).
 
 
 \section{Algorithm (Formal Definition)}
 \label{sec:algorithm}
 
 \subsection{\textbf{Problem Setting and Notation}}
-Let $A = \langle a_1, a_2, \dots, a_N\rangle$ be a sequence of keys drawn from a totally ordered domain $(\mathcal{D}, \le)$.
-We write $[m] := \{1,2,\dots,m\}$.
-The goal is to output a sequence $S$ that is a nondecreasing permutation of $A$.
+Let \(A=\langle a_1,\dots,a_N\rangle\) be keys from a totally ordered domain \((\mathcal{D},\le)\), and let \([m]=\{1,\dots,m\}\). The goal is to output a nondecreasing permutation \(S\) of \(A\).
 
 \paragraph{Deterministic tie handling (implementation).}
-Our implementation sorts plain keys and resolves equal-key comparisons deterministically.
-In Phase~1 (decomposition), placement uses the predicate ``$\texttt{tops}[j] \le x$''; since $x$ is appended to exactly one ladder, each ladder remains nondecreasing.
-In Phase~2 (merge), comparisons use the key order first, and when keys are equal, we apply a fixed tie-break rule based on ladder identifier (Definition~5). This makes the algorithm deterministic on inputs with duplicates, but it does not enforce global stability with respect to the original input order across different ladders.
+Placement uses \(\texttt{tops}[j]\le x\). During merge, equal keys are ordered by ladder id (Definition~5), giving reproducible output under duplicates but not global stability by original input position.
 
 
 \subsection{\textbf{Ladders and the Parameter $K$}}
 
 \paragraph{Definition 1 (Ladder).}
-A \emph{ladder} is a finite sequence $L=\langle \ell_1,\dots,\ell_m\rangle$ such that
+A \emph{ladder} is a finite nondecreasing sequence \(L=\langle \ell_1,\dots,\ell_m\rangle\):
 \[
 \ell_1 \le \ell_2 \le \cdots \le \ell_m,
 \]
-i.e., $L$ is nondecreasing under the key order $\le$.
 
 
 \paragraph{Definition 2 (Tail and tail array).}
-Given a nonempty ladder $L$, its \emph{tail} is $\mathrm{tail}(L) := \ell_m$.
-During Phase~1 the algorithm maintains:
-\begin{itemize}
-\item a list of ladders $(L_1,\dots,L_K)$, and
-\item an array $\texttt{tops}[1..K]$ where $\texttt{tops}[j] := \mathrm{tail}(L_j)$.
-\end{itemize}
-The algorithm maintains the invariant:
+For a nonempty ladder \(L\), \(\mathrm{tail}(L)=\ell_m\). Phase~1 maintains ladders \((L_1,\dots,L_K)\) and \(\texttt{tops}[j]=\mathrm{tail}(L_j)\), with invariant
 \[
 \texttt{tops}[1] \ge \texttt{tops}[2] \ge \cdots \ge \texttt{tops}[K].
 \]
-(With $\ge$ understood as the reverse of the comparison order in use.)
 
 \paragraph{Definition 3 (Placement index).}
-For a key $x$ and a nonincreasing array $\texttt{tops}[1..K]$, define the placement index
+For key \(x\), define
 \[
 \pi(x; \texttt{tops}) := \min\{ j \in [K] : \texttt{tops}[j] \le x \},
 \]
-if the set is nonempty; otherwise define $\pi(x;\texttt{tops}) := K+1$.
+or \(\pi(x;\texttt{tops})=K+1\) if no feasible ladder exists.
 
-\paragraph{Definition 4 (Formal definition of $K$).}
-Let $(L_1,\dots,L_K)$ be the ladders constructed by Phase~1 using the placement rule in Definition~3.
-Then $K$ is the \emph{number of ladders produced by this deterministic construction} (equivalently, $K = |\texttt{tops}|$ at the end of Phase~1).
-Note that this $K$ is algorithm-induced; it is not assumed to be the minimum possible number of nondecreasing subsequences.
+\paragraph{Definition 4 (Formal definition of \(K\)).}
+\(K\) is the number of ladders produced by the deterministic Phase~1 placement rule. It is algorithm-induced and is not assumed to be the minimum possible number of nondecreasing subsequences.
 
 \subsection{\textbf{Phase 1: Tail-Guided Decomposition}}
 
@@ -290,22 +265,16 @@ After processing the prefix $\langle a_1,\dots,a_t\rangle$, the algorithm mainta
 \end{algorithm}
 
 \paragraph{Implementation note (search).}
-\textsc{HintedLowerBoundNonIncreasing} returns the first index $j$ such that $\texttt{tops}[j]\le x$ (or $K+1$ if none exists).
-Our implementation combines a constant-time local probe around the previous index, exponential galloping to bound the search interval, and a binary search within the bounded interval.
+\textsc{HintedLowerBoundNonIncreasing} returns the first \(j\) with \(\texttt{tops}[j]\le x\), using a local probe, exponential gallop, and binary search.
 
 \subsection{\textbf{Phase 2: Merge and Formal Tie-Breaking}}
 
 \paragraph{Definition 5 (Run identifier tie-break).}
-For $K$ ladders, assign each ladder a fixed identifier $j\in[K]$ according to creation order.
-During $K$-way merge, we compare current head elements of ladders by the total order:
+Each ladder receives a fixed id \(j\in[K]\). During \(K\)-way merge, heads are compared by
 \[
 (x,j) \prec (y,\ell) \iff (x<y)\ \lor\ (x=y\ \wedge\ j<\ell).
 \]
-This makes the merge deterministic; equal keys are emitted by increasing ladder id.
-
-\paragraph{Remark (stability).}
-With the tie-break of Definition~5, equal keys are emitted in increasing ladder-id order, which is deterministic.
-However, because equal keys from different ladders are ordered by ladder id (not by original input position), this implementation is not globally stable with respect to the original input order across ladders.
+This deterministic tie-break is not a global stability guarantee across ladders.
 
 
 \begin{algorithm}[H]
@@ -321,9 +290,8 @@ However, because equal keys from different ladders are ordered by ladder id (not
 \end{algorithmic}
 \end{algorithm}
 
-\paragraph{Loser-tree merge (formal comparison).}
-The loser-tree maintains one current head element per ladder.
-At each step it outputs the globally smallest head under the comparison of Definition~5, advances that ladder, and restores the tournament structure in $O(\log K)$ time per output.
+\paragraph{Loser-tree merge.}
+The loser tree keeps one current head per ladder, outputs the minimum under Definition~5, advances that ladder, and restores the tournament in \(O(\log K)\) time.
 
 \subsection{\textbf{Complexity}}
 Phase~1 performs $N$ placements, each costing $O(\log K)$ worst-case, yielding $O(N\log K)$ time.
@@ -333,140 +301,42 @@ Auxiliary space is $O(N+K)$ to store ladders and merge state.
 \section{\textbf{Correctness Proof}}
 \label{sec:correctness}
 
-We prove that \textsc{LadderSort} outputs a globally nondecreasing permutation of the input.
-Throughout, ``sorted'' means nondecreasing under the key order $\le$.
-When duplicates occur, Phase~2 uses the deterministic tie-break of Definition~5; this does not change
-key-sortedness (it only selects a deterministic order among equal keys).
-
-\subsection{\textbf{Lemma 1: Each ladder remains sorted}}
+\subsection{\textbf{Proof sketch}}
 \label{lem:ladder_sorted}
-
-\paragraph{Lemma 1.}
-After processing any prefix $\langle a_1,\dots,a_t\rangle$ in Phase~1, every ladder $L_j$ is nondecreasing.
-
-\paragraph{Proof.}
-We argue by induction on $t$.
-For $t=1$, the algorithm creates $L_1=\langle a_1\rangle$, which is trivially nondecreasing.
-Assume the claim holds after processing $\langle a_1,\dots,a_{t-1}\rangle$.
-At step $t$, the algorithm processes $x=a_t$ and chooses an index
-$j=\pi(x;\texttt{tops})$ (Definition~3), i.e., the first $j$ such that $\texttt{tops}[j]\le x$,
-or creates a new ladder if none exists.
-If a new ladder is created, it is $\langle x\rangle$ and is sorted.
-Otherwise, $x$ is appended to $L_j$ whose current tail is $\texttt{tops}[j]$.
-By the choice of $j$, $\texttt{tops}[j]\le x$, so the new last two elements satisfy
-$\mathrm{tail}(L_j)\le x$, preserving nondecreasing order of $L_j$.
-All other ladders are unchanged and remain sorted by the induction hypothesis.
-\hfill$\square$
-
-\subsection{\textbf{Lemma 2: \texttt{tops} remains non-increasing}}
 \label{lem:tops_nonincreasing}
-
-\paragraph{Lemma 2.}
-After each insertion step of Phase~1, the array $\texttt{tops}[1..K]$ is nonincreasing:
-$\texttt{tops}[1]\ge \texttt{tops}[2]\ge \cdots \ge \texttt{tops}[K]$.
-
-\paragraph{Proof.}
-Assume $\texttt{tops}$ is nonincreasing before processing $x$.
-Let $j=\pi(x;\texttt{tops})$.
-There are two cases.
-
-\emph{Case 1:} $j=K+1$ (no index satisfies $\texttt{tops}[j]\le x$).
-Then $x<\texttt{tops}[p]$ for all $p\in[K]$, and the algorithm appends a new entry
-$\texttt{tops}[K+1]\gets x$.
-Thus $\texttt{tops}[K]\ge x=\texttt{tops}[K+1]$, preserving nonincreasing order.
-
-\emph{Case 2:} $j\in[K]$.
-The algorithm updates only $\texttt{tops}[j]\gets x$.
-By definition of $\pi(\cdot)$, for all $p<j$ we have $\texttt{tops}[p]>x$, hence $\texttt{tops}[p]\ge \texttt{tops}[j]$ after update.
-Also, since $j$ is the \emph{first} index with $\texttt{tops}[j]\le x$, we have for $j+1\le q\le K$:
-$\texttt{tops}[q]\le \texttt{tops}[j]_{\text{old}}\le x=\texttt{tops}[j]_{\text{new}}$,
-so $\texttt{tops}[j]\ge \texttt{tops}[q]$ holds after the update.
-All other positions are unchanged.
-Therefore $\texttt{tops}$ remains nonincreasing.
-\hfill$\square$
-
-\subsection{\textbf{Lemma 3: Merge outputs a globally sorted list}}
 \label{lem:merge_sorted}
-
-\paragraph{Lemma 3.}
-Assume $L_1,\dots,L_K$ are nondecreasing ladders (Lemma~\ref{lem:ladder_sorted}).
-Then \textsc{MergeByK}$(L_1,\dots,L_K)$ outputs a sequence $S$ that is globally nondecreasing
-and is a permutation of the multiset union of the ladder elements.
-
-\paragraph{Proof.}
-We consider the cases in Algorithm~\ref{alg:mergebyk}.
-
-\emph{Case $K=0$:} output is empty, trivially sorted and a permutation.
-
-\emph{Case $K=1$:} output is $L_1$, which is sorted by assumption and is exactly the input multiset.
-
-\emph{Case $K=2$:} \textsc{TwoWayMergeWithGalloping} is a standard two-way merge
-(possibly accelerated by galloping) that repeatedly outputs the smaller current head
-between the two sorted inputs. Galloping only skips ahead by outputting contiguous blocks that are
-provably $\le$ the opposing head; it does not change correctness, only reduces comparisons.
-Thus the result is sorted and contains each element exactly once.
-
-\emph{Case $K>2$:} \textsc{KWayMergeLoserTree} maintains one current head per ladder and repeatedly
-outputs the minimum head under the total order of Definition~5:
-$(x,j)\prec(y,\ell)$ iff $x<y$ or ($x=y$ and $j<\ell$).
-Because each ladder is nondecreasing, advancing a ladder pointer never decreases its current head.
-At each step, the algorithm outputs the globally smallest available head (under $\prec$),
-then advances exactly that ladder by one element and restores the tournament in $O(\log K)$ time.
-Therefore the produced sequence is nondecreasing under $\prec$.
-In particular, it is nondecreasing by key order $\le$, since $\prec$ refines $\le$ by only breaking ties.
-Finally, every output step removes exactly one element from exactly one ladder, and the process
-terminates after outputting all ladder elements, so the output is a permutation of the union.
-\hfill$\square$
-
-\subsection{\textbf{Lemma 4: Complexity is $O(N\log K)$}}
 \label{lem:complexity}
-
-\paragraph{Lemma 4.}
-Let $N$ be the input length and let $K$ be the number of ladders produced in Phase~1.
-Then \textsc{LadderSort} runs in $O(N\log K)$ time and uses $O(N+K)$ auxiliary space.
-
-\paragraph{Proof.}
-Phase~1 performs $N$ placements. Each placement computes
-$j=\pi(x;\texttt{tops})$ using \textsc{HintedLowerBoundNonIncreasing}.
-In the worst case, the search performs a bounded exponential gallop and a binary search
-over an interval of $\texttt{tops}$, which costs $O(\log K)$ comparisons.
-Thus Phase~1 costs $O(N\log K)$ time.
-
-Phase~2 depends on $K$.
-If $K\in\{0,1\}$ the return is $O(N)$.
-If $K=2$, a standard merge outputs $N$ elements in $O(N)$ time.
-If $K>2$, the loser tree builds in $O(K)$ time and performs $N$ extract-and-advance steps,
-each costing $O(\log K)$, for total $O(K+N\log K)=O(N\log K)$ (since $K\le N$ always holds here).
-Space: the ladders store all $N$ elements plus $O(K)$ metadata ($\texttt{tops}$ and merge state),
-so auxiliary space is $O(N+K)$.
-\hfill$\square$
-
-\subsection{\textbf{Main Theorem}}
 \label{thm:correctness}
 
-\paragraph{Theorem 1 (Correctness of LadderSort).}
-For any input sequence $A=\langle a_1,\dots,a_N\rangle$ over a totally ordered domain,
-\textsc{LadderSort}$(A)$ outputs a sequence $S$ that:
-(i) is a permutation of $A$, and
-(ii) is nondecreasing under $\le$.
+Phase~1 appends a key \(x\) only to a ladder whose current tail is \(\le x\);
+otherwise it creates a new one-element ladder. Thus each ladder remains
+nondecreasing. The same placement rule preserves the nonincreasing order of
+\texttt{tops}: replacing the first tail \(\le x\) keeps all earlier tails above
+\(x\), while all later tails are already no larger than the replaced tail; a new
+ladder is appended only when \(x\) is smaller than every current tail.
 
-\paragraph{Proof.}
-By Lemma~\ref{lem:ladder_sorted}, after Phase~1 each ladder $L_j$ is nondecreasing.
-Lemma~\ref{lem:tops_nonincreasing} ensures the maintained tail structure is consistent with the placement rule,
-but correctness of the final output depends on the ladder sortedness and the merge.
-By Lemma~\ref{lem:merge_sorted}, merging the sorted ladders yields a globally nondecreasing sequence
-that contains each ladder element exactly once, hence is a permutation of the original input multiset.
-Therefore the returned sequence $S$ is a key-sorted permutation of $A$.
-\hfill$\square$
+After decomposition, Phase~2 merges sorted ladders. The cases \(K=0\) and
+\(K=1\) are immediate, \(K=2\) is a standard two-way merge, and \(K>2\) uses a
+loser tree to repeatedly output the smallest current ladder head. The
+tie-breaker in Definition~5 orders equal keys by ladder id, so output is
+deterministic but not globally stable by original position. Since each merge
+step consumes exactly one input element and outputs it once, the result is a
+sorted permutation of the input.
+
+For complexity, Phase~1 performs \(N\) searches over \texttt{tops}, each costing
+\(O(\log K)\) in the worst case. Phase~2 is linear for \(K\le2\), and for
+\(K>2\) the loser tree costs \(O(K)\) to build and \(O(\log K)\) per output.
+Since \(K\le N\), the total time is \(O(N\log K)\), with \(O(N+K)\) auxiliary
+space for ladders and merge state. \(\square\)
 
 
-\subsection{\texorpdfstring{\textbf{Flowchart of
-LadderSort:}}{Flowchart of LadderSort:}}\label{flowchart-of-laddersort}
+\subsection{Implementation Flowchart}
+\label{flowchart-of-laddersort}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.82\linewidth]{media/media/image2.jpg}
-\caption{Implementation flowchart of LadderSort. The diagram summarizes the decomposition and merge control flow after the conceptual overview in Figure~\ref{fig:overview}.}
+\includegraphics[width=0.48\linewidth]{media/media/image2.jpg}
+\caption{Implementation flowchart for LadderSort.}
 \label{fig:laddersort-flowchart}
 \end{figure}
 \section{Experimental Setup}\label{experimental-setup}
@@ -568,349 +438,59 @@ The controlled sweep isolates \(K\) by fixing \(N=10^7\) and varying target \(K\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\linewidth]{media/media/k_sweep_runtime_vs_k.pdf}
-\caption{Controlled \(K\)-sweep at \(N=10^7\) using randomized exact-\(K\) interleavings. Median runtime in seconds generally increases with the measured ladder count \(K\), consistent with LadderSort's \(O(N\log K)\) parameterization; TimSort remains strongest at \(K=1\), where the input is already one sorted run.}
+\caption{Controlled \(K\)-sweep at \(N=10^7\). Median runtime is in seconds and rises with measured \(K\).}
 \label{fig:k-sweep-runtime}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\linewidth]{media/media/k_sweep_speedup_vs_k.pdf}
-\caption{Speedup relative to TimSort on the controlled randomized exact-\(K\) sweep. Values are median runtime ratios with TimSort as the baseline; LadderSort and Hybrid LadderSort are strongest in the small-\(K\) interleaved regime, while their advantage narrows as \(K\) grows.}
+\caption{Controlled \(K\)-sweep speedup. Values are median runtime ratios relative to TimSort.}
 \label{fig:k-sweep-speedup}
 \end{figure}
 
 TimSort is fastest at \(K=1\), where the input is a single already sorted run. For small interleaved values of \(K\), LadderSort and Hybrid LadderSort are competitive or faster than TimSort; as \(K\) grows, the advantage narrows. This supports the intended use case: inputs formed by a small number of interleaved ordered streams.
 
-\subsection{\texorpdfstring{\textbf{Uniform Random Inputs}}{Uniform Random Inputs}}\label{uniform-random-inputs}
+\subsection{Main Runtime Summary}
+\label{main-runtime-summary}
 
-The random generator produces 31-bit uniformly distributed integers, with
-duplicates possible but rare. This is the weak-structure regime: measured \(K\)
-is large compared with the fan-in workloads, and no long contiguous runs are
-available. Table~1 shows that \texttt{std::sort} is fastest, while LadderSort is
-competitive but not the main winner because placement and merge overhead remain
-visible when there is little interleaved order to exploit.
+The full runtime suite covers eight synthetic workloads at \(10^6\), \(10^7\),
+and \(10^8\) elements. To keep the main paper compact,
+Table~\ref{tab:runtime-summary-100m} reports the largest-size case. The
+complete per-size results remain in the saved result files. The summary keeps
+the central pattern: LadderSort is strongest when the input has a small
+measured ladder count \(K\), competitive but not dominant on random input, and
+weakest on descending input where \(K\approx N\).
 
-Table 1. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for uniform random inputs; \texttt{std::sort} is fastest while
-LadderSort remains competitive when little order is present.
-
-\begin{longtable}{@{}lrrr@{}}
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Representative runtime summary at \(N=10^8\). Times are mean seconds over 10 runs.}
+\label{tab:runtime-summary-100m}
+\begin{tabularx}{\linewidth}{@{}l r r r r X@{}}
 \toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
+Workload & Measured \(K\) & LadderSort & TimSort & \texttt{std::sort} & Takeaway \\
 \midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
+Uniform random & 19955.1 & 8.352 & 10.021 & 7.286 & \texttt{std::sort} strongest; LadderSort competitive \\
+Ascending & 1 & 0.412 & 0.051 & 7.792 & TimSort best on one contiguous run \\
+Descending & \(10^8\) & 18.636 & 0.041 & 0.999 & Raw LadderSort worst case; TimSort reverses run \\
+Band-limited & 16.6 & 1.928 & 2.520 & 7.975 & Small \(K\) from bounded jitter \\
+Block-cyclic & 8 & 0.955 & 1.085 & 4.776 & Eight interleaved producers \\
+Two-run riffle & 2 & 1.340 & 1.612 & 4.595 & Two-way merge regime \\
+Social-feed & 24 & 1.112 & 1.590 & 9.208 & Tie-heavy small-\(K\) fan-in \\
+Partial index & 16 & 1.187 & 1.580 & 3.213 & Repeated-key segment merge \\
 \bottomrule
-\endfoot
+\end{tabularx}
+\end{table}
 
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.060284 (\(\pm\)0.000284) & 0.711542 (\(\pm\)0.008003) & 8.352131 (\(\pm\)0.077906) \\
-TimSort & 0.076062 (\(\pm\)0.000618) & 0.862810 (\(\pm\)0.000686) & 10.021459 (\(\pm\)0.064812) \\
-QuickSort & 0.067775 (\(\pm\)0.000215) & 0.799014 (\(\pm\)0.000631) & 9.366719 (\(\pm\)0.132511) \\
-IntroSort (C++) & 0.053926 (\(\pm\)0.000487) & 0.624150 (\(\pm\)0.000935) & 7.286278 (\(\pm\)0.079395) \\
-StableSort (C++) & 0.061197 (\(\pm\)0.000084) & 0.712756 (\(\pm\)0.000536) & 8.397854 (\(\pm\)0.012043) \\
-MergeSort & 0.067966 (\(\pm\)0.000106) & 0.775633 (\(\pm\)0.001740) & 9.244554 (\(\pm\)0.059223) \\
-\end{longtable}
-
-\subsection{\texorpdfstring{\textbf{Sorted Ascending Inputs}}{Sorted Ascending Inputs}}\label{sorted-ascending-inputs}
-
-Sorted ascending input is the \(K=1\) case for LadderSort and a single natural
-run for TimSort. Table~2 shows that TimSort has the smallest constant on this
-input, while LadderSort is also linear but pays additional bookkeeping and copy
-overhead. Partition-based and general merge-based baselines do not exploit the
-single-run structure as directly.
-
-Table 2. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for sorted ascending inputs; TimSort has the smallest constant on the
-single-run case while LadderSort remains linear with \(K=1\).
-
-\begin{longtable}{@{}lrrr@{}}
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
-\bottomrule
-\endfoot
-
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.003814 (\(\pm\)0.000779) & 0.032428 (\(\pm\)0.004184) & 0.412089 (\(\pm\)0.022985) \\
-TimSort & 0.000308 (\(\pm\)0.000005) & 0.003213 (\(\pm\)0.000007) & 0.050807 (\(\pm\)0.002490) \\
-QuickSort & 0.012358 (\(\pm\)0.000065) & 0.137529 (\(\pm\)0.000890) & 1.579520 (\(\pm\)0.010150) \\
-IntroSort (C++) & 0.052283 (\(\pm\)0.000268) & 0.639582 (\(\pm\)0.001192) & 7.792178 (\(\pm\)0.030446) \\
-StableSort (C++) & 0.007051 (\(\pm\)0.000022) & 0.083395 (\(\pm\)0.000275) & 0.977368 (\(\pm\)0.006558) \\
-MergeSort & 0.006461 (\(\pm\)0.000016) & 0.085276 (\(\pm\)0.002955) & 1.008359 (\(\pm\)0.028363) \\
-\end{longtable}
-
-\subsection{\texorpdfstring{\textbf{Sorted Descending Inputs}}{Sorted Descending Inputs}}\label{sorted-descending-inputs}
-
-Sorted descending input is the adversarial edge case for raw LadderSort:
-Phase~1 creates nearly one ladder per element, so \(K\approx N\). Table~3 shows
-this high-\(K\) worst case. TimSort is effectively in a best-case regime because
-it detects the descending run and reverses it, while the in-place baselines also
-avoid the large \(K\)-way merge overhead.
-
-Table 3. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for sorted descending inputs; this is LadderSort's high-\(K\) worst
-case and TimSort's run-reversal best case.
-
-{\small
-\begin{longtable}{@{}lrrr@{}}
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
-\bottomrule
-\endfoot
-
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.099664 (\(\pm\)0.000933) & 1.204596 (\(\pm\)0.028324) & 18.636188 (\(\pm\)1.049449) \\
-TimSort & 0.000312 (\(\pm\)0.000003) & 0.003314 (\(\pm\)0.000022) & 0.040585 (\(\pm\)0.000256) \\
-QuickSort & 0.012717 (\(\pm\)0.000089) & 0.140608 (\(\pm\)0.004181) & 1.595088 (\(\pm\)0.004581) \\
-IntroSort (C++) & 0.007342 (\(\pm\)0.000009) & 0.094218 (\(\pm\)0.014076) & 0.998968 (\(\pm\)0.001724) \\
-StableSort (C++) & 0.008605 (\(\pm\)0.000032) & 0.100982 (\(\pm\)0.000412) & 1.152614 (\(\pm\)0.002390) \\
-MergeSort & 0.009635 (\(\pm\)0.000030) & 0.108443 (\(\pm\)0.002083) & 1.279382 (\(\pm\)0.015677) \\
-\end{longtable}
-}
-
-\subsection{\texorpdfstring{\textbf{Nearly Sorted Inputs with Bounded Local Jitter}}{Nearly Sorted Inputs with Bounded Local Jitter}}\label{nearly-sorted-inputs-with-bounded-local-jitter}
-
-The band-limited permutation workload shuffles the sorted sequence only within
-windows of size \(W+1\) (\(W=32\)), so no element moves far from its original
-position and the effective ladder count stays small. Table~4 shows that
-LadderSort benefits from this small-\(K\) structure, with StableSort close on
-some sizes. TimSort uses local order but still observes many short runs, and
-partition-based methods do not exploit the bounded-displacement structure.
-
-Table 4. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for band-limited nearly sorted inputs (\(W=32\)); LadderSort benefits
-from the small effective ladder count induced by bounded local jitter.
-
-{\small
-\begin{longtable}{@{}lrrr@{}}
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
-\bottomrule
-\endfoot
-
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.018413 (\(\pm\)0.001220) & 0.184734 (\(\pm\)0.002650) & 1.928484 (\(\pm\)0.041110) \\
-TimSort & 0.025139 (\(\pm\)0.000041) & 0.247422 (\(\pm\)0.001032) & 2.519951 (\(\pm\)0.011741) \\
-QuickSort & 0.027009 (\(\pm\)0.000091) & 0.291233 (\(\pm\)0.001167) & 3.145271 (\(\pm\)0.009378) \\
-IntroSort (C++) & 0.056191 (\(\pm\)0.000062) & 0.677812 (\(\pm\)0.002503) & 7.974671 (\(\pm\)0.045230) \\
-StableSort (C++) & 0.018900 (\(\pm\)0.000038) & 0.198993 (\(\pm\)0.000408) & 2.141182 (\(\pm\)0.008664) \\
-MergeSort & 0.023829 (\(\pm\)0.000098) & 0.234845 (\(\pm\)0.001104) & 2.684934 (\(\pm\)0.022102) \\
-\end{longtable}
-}
-
-\subsection{\texorpdfstring{\textbf{Block-Cyclic Interleave}}{Block-Cyclic Interleave}}\label{block-cyclic-interleave}
-
-The block-cyclic workload interleaves \(K=8\) sorted producers emitting blocks
-of size \(B=4\). This is a direct small-\(K\) fan-in pattern, and Table~5 shows
-that LadderSort performs best across the tested sizes. TimSort observes local
-sortedness but many short runs, StableSort remains competitive with extra copy
-traffic, and partition-based methods do not use the producer structure.
-
-Table 5. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for block-cyclic interleave inputs (\(K=8, B=4\)); LadderSort leads by
-recovering the eight interleaved producer streams.
-
-{\small
-\begin{longtable}{@{}lrrr@{}}
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
-\bottomrule
-\endfoot
-
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.009034 (\(\pm\)0.001325) & 0.087689 (\(\pm\)0.003280) & 0.954970 (\(\pm\)0.035121) \\
-TimSort & 0.011258 (\(\pm\)0.000115) & 0.114428 (\(\pm\)0.008528) & 1.084507 (\(\pm\)0.017320) \\
-QuickSort & 0.048795 (\(\pm\)0.000060) & 0.545557 (\(\pm\)0.001485) & 6.361478 (\(\pm\)0.019182) \\
-IntroSort (C++) & 0.037141 (\(\pm\)0.000164) & 0.428570 (\(\pm\)0.000647) & 4.776093 (\(\pm\)0.019065) \\
-StableSort (C++) & 0.009841 (\(\pm\)0.000054) & 0.114720 (\(\pm\)0.000686) & 1.331516 (\(\pm\)0.009939) \\
-MergeSort & 0.011499 (\(\pm\)0.000085) & 0.128904 (\(\pm\)0.000871) & 1.565909 (\(\pm\)0.025747) \\
-\end{longtable}
-}
-
-\subsection{\texorpdfstring{\textbf{Two-Run Riffle}}{Two-Run Riffle}}\label{two-run-riffle}
-
-The two-run riffle workload interleaves two sorted halves, giving
-\(K\approx 2\). Table~6 shows LadderSort's advantage in this setting: after
-reconstructing the two ladders, it reduces the problem to one two-way merge.
-TimSort is next, while StableSort and MergeSort perform related merge work with
-more buffer traffic. Partition-based methods do not benefit from the small
-ladder count.
-
-Table 6. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for two-run riffle inputs; LadderSort leads by reducing the workload
-to a \(K=2\) two-way merge.
-
-{\small
-\begin{longtable}{@{}lrrr@{}}
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
-\bottomrule
-\endfoot
-
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.011840 (\(\pm\)0.000138) & 0.115206 (\(\pm\)0.003219) & 1.339615 (\(\pm\)0.033321) \\
-TimSort & 0.016426 (\(\pm\)0.000408) & 0.153702 (\(\pm\)0.000894) & 1.611879 (\(\pm\)0.022445) \\
-QuickSort & 0.041296 (\(\pm\)0.000216) & 0.496247 (\(\pm\)0.001000) & 5.322729 (\(\pm\)0.019506) \\
-IntroSort (C++) & 0.040121 (\(\pm\)0.000162) & 0.459920 (\(\pm\)0.000465) & 4.595198 (\(\pm\)0.032761) \\
-StableSort (C++) & 0.013342 (\(\pm\)0.000316) & 0.143149 (\(\pm\)0.000607) & 1.619594 (\(\pm\)0.020108) \\
-MergeSort & 0.014821 (\(\pm\)0.000096) & 0.161039 (\(\pm\)0.001319) & 1.927994 (\(\pm\)0.048978) \\
-\end{longtable}
-}
-
-\subsection{\texorpdfstring{\textbf{Social-Feed Fan-In}}{Social-Feed Fan-In}}\label{social-feed-fan-in}
-
-The social-feed workload models sticky bursts from 10--40 producers, with many
-repeated timestamps and a small measured \(K\). Table~7 shows that LadderSort
-performs strongly on this tie-heavy fan-in pattern because it reconstructs the
-per-source ladders and uses deterministic tie-breaking during merge. TimSort and
-merge-based baselines benefit from local order, while partitioning large
-equality plateaus is less favorable.
-
-Table 7. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for social-feed fan-in inputs; LadderSort performs strongly on this tie-heavy
-small-\(K\) multi-source workload.
-
-{\small
-\begin{longtable}{@{}lrrr@{}}
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
-\bottomrule
-\endfoot
-
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.010511 (\(\pm\)0.001152) & 0.101416 (\(\pm\)0.005685) & 1.112252 (\(\pm\)0.030992) \\
-TimSort & 0.017365 (\(\pm\)0.000147) & 0.148320 (\(\pm\)0.002117) & 1.589728 (\(\pm\)0.011485) \\
-QuickSort & 0.013070 (\(\pm\)0.000044) & 0.154958 (\(\pm\)0.000549) & 1.841403 (\(\pm\)0.017027) \\
-IntroSort (C++) & 0.022060 (\(\pm\)0.000046) & 0.623835 (\(\pm\)0.001309) & 9.208073 (\(\pm\)0.084188) \\
-StableSort (C++) & 0.013298 (\(\pm\)0.000116) & 0.142700 (\(\pm\)0.000788) & 1.631445 (\(\pm\)0.020788) \\
-MergeSort & 0.013936 (\(\pm\)0.000139) & 0.155518 (\(\pm\)0.000805) & 1.863321 (\(\pm\)0.035130) \\
-\end{longtable}
-}
-
-\subsection{\texorpdfstring{\textbf{Partial Index Merges}}{Partial Index Merges}}\label{partial-index-merges}
-
-The partial-index workload merges hot posting-list segments with overlapping
-docID ranges, repeated keys, and short bursts. This again yields a small-\(K\)
-merge-shaped input. Table~8 shows that LadderSort performs strongly by
-recovering the segment ladders and using its loser-tree merge. TimSort and
-merge-based baselines remain reasonable, while partition-based methods gain
-less from the repeated-key structure.
-
-Table 8. Runtime in seconds, reported as mean \(\pm\) standard deviation over
-10 runs, for partial index merge inputs; LadderSort performs strongly by exploiting the
-small fan-in and repeated-key merge structure.
-
-{\small
-\begin{longtable}{@{}lrrr@{}}
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endfirsthead
-
-\toprule
-Name & 1M (s) & 10M (s) & 100M (s) \\
-\midrule
-\endhead
-
-\bottomrule
-\endfoot
-
-\bottomrule
-\endlastfoot
-
-LadderSort & 0.010009 (\(\pm\)0.001179) & 0.098894 (\(\pm\)0.002472) & 1.186517 (\(\pm\)0.074247) \\
-TimSort & 0.016116 (\(\pm\)0.000091) & 0.147210 (\(\pm\)0.009107) & 1.580356 (\(\pm\)0.028986) \\
-QuickSort & 0.028305 (\(\pm\)0.000063) & 0.316342 (\(\pm\)0.007865) & 3.589427 (\(\pm\)0.032215) \\
-IntroSort (C++) & 0.026411 (\(\pm\)0.000094) & 0.306428 (\(\pm\)0.000769) & 3.212840 (\(\pm\)0.010319) \\
-StableSort (C++) & 0.017223 (\(\pm\)0.000027) & 0.182740 (\(\pm\)0.000493) & 2.026903 (\(\pm\)0.012580) \\
-MergeSort & 0.017828 (\(\pm\)0.000050) & 0.195492 (\(\pm\)0.002226) & 2.182471 (\(\pm\)0.018061) \\
-\end{longtable}
-}
-
-Overall, the picture is consistent across sizes and workloads.
-LadderSort is at its best when the input decomposes into a small number
-of interleaved nondecreasing streams (small \(K\)): block-cyclic interleave,
-two-run riffle, social-feed fan-in, and partial-index merges all favor
-its hinted placement plus \(K\)-way loser-tree merge, with deterministic tie-handling
-benefiting tie-heavy cases. It is competitive---but not leading---on uniform
-random, where there's little structure to exploit and partition-based
-\texttt{std::sort} sets the pace. At the other extreme, fully monotone inputs
-split: TimSort wins outright on both sorted and reverse-sorted data
-thanks to run detection (and reversal), while LadderSort remains linear
-on ascending but hits its worst case on descending as \(K \approx N\). Stable
-baselines (\texttt{std::stable\_sort} and our mergesort) track closely on
-merge-friendly workloads but pay extra memory traffic and generally sit
-behind LadderSort there. The takeaway is practical: use LadderSort when
-your pipeline naturally produces a few ordered sources or bounded-jitter
-streams; reach for TimSort on long runs (including descending), and
-prefer \texttt{std::sort} when inputs look unstructured.
+These results explain the broader benchmark behavior. Small-\(K\) interleavings
+such as block-cyclic, two-run riffle, social-feed, and partial-index inputs
+favor LadderSort because Phase~1 reconstructs the producer-like ladders and
+Phase~2 performs a light merge. Random input has weaker structure, so
+\texttt{std::sort} remains the best baseline. Ascending input gives \(K=1\),
+but TimSort has a smaller constant. Descending input is the raw LadderSort worst
+case because it creates one ladder per element; this motivates the hybrid
+guardrail evaluated later.
 
 \subsection{Ablation Study}
 \label{ablation-study}
@@ -925,7 +505,7 @@ riffle isolates the \(K=2\) merge path.
 \begin{table}[H]
 \centering
 \small
-\caption{Phase 4 ablation results. Entries are median relative runtimes normalized to LadderFull \(=1.00\) for the same workload and input size; values above 1.00 are slower than LadderFull, and the table shows that hints and loser-tree merging matter most in the \(K>2\) social-feed regime.}
+\caption{Phase 4 ablation results. Entries are median relative runtimes normalized to LadderFull \(=1.00\).}
 \label{tab:phase4-ablation}
 \begin{tabularx}{\linewidth}{@{}l X rrr rrr@{}}
 \toprule
@@ -968,7 +548,7 @@ random-input worst cases while preserving the small-\(K\) path.
 \begin{table}[H]
 \centering
 \scriptsize
-\caption{Hybrid LadderSort evaluation. Speedups are median runtime ratios relative to Raw LadderSort and TimSort, and fallback rate is the fraction of runs that switched to the fallback path; the hybrid protects high-\(K\) cases while preserving the small-\(K\) path.}
+\caption{Hybrid LadderSort evaluation. Speedups are median runtime ratios; fallback rate is the fraction of fallback runs.}
 \label{tab:phase4-hybrid}
 \begin{tabularx}{\linewidth}{@{}l r r r r X@{}}
 \toprule
@@ -999,36 +579,36 @@ and merge.
 \subsection{Memory and Comparison Overheads}
 \label{memory-and-comparison-overheads}
 
-The preceding experiments focus primarily on runtime. We also measure peak resident memory and key-comparison counts to separate algorithmic behavior from implementation speed. Table~\ref{tab:phase5-memory} reports peak resident set size at \(N=10^8\), while the full result pack also includes \(N=10^7\) measurements with three seeds. The \(10^8\) rows are reported as a one-seed stress case due to runtime and memory cost.
+We also measure peak resident memory and key-comparison counts. Table~\ref{tab:phase5-memory} reports the \(N=10^8\) one-seed memory stress case; the result pack retains the \(N=10^7\) three-seed runs.
 
 \begin{table}[H]
 \centering
-\small
-\caption{Peak resident set size at \(N=10^8\), reported in GiB. The \(10^8\) memory experiment uses one seed as a large stress case, showing that Hybrid reduces the descending high-\(K\) footprint while Raw and Hybrid match on small-\(K\) social-feed input.}
+\scriptsize
+\caption{Peak resident set size at \(N=10^8\), reported in GiB. Hybrid reduces high-\(K\) descending memory use while matching Raw LadderSort on small-\(K\) social-feed input.}
 \label{tab:phase5-memory}
-\begin{tabularx}{\linewidth}{@{}lrrrrX@{}}
+\begin{tabular}{@{}lrrrrr@{}}
 \toprule
-Dataset & Raw LadderSort & Hybrid LadderSort & TimSort & \texttt{std::sort} & \texttt{std::stable\_sort} \\
+Dataset & Raw & Hybrid & TimSort & \texttt{sort} & \texttt{stable} \\
 \midrule
 Descending & 3.73 & 1.12 & 1.62 & 1.62 & 1.62 \\
 Random & 1.06 & 1.26 & 1.12 & 0.75 & 0.90 \\
 Social-feed & 1.82 & 1.82 & 0.78 & 0.75 & 1.12 \\
 \bottomrule
-\end{tabularx}
+\end{tabular}
 \end{table}
 
-The memory measurements show the expected tradeoff. Raw LadderSort stores all ladders and merge state, so it can use more memory than in-place or mostly in-place baselines. This is most visible on descending input, where \(K=N\) and raw LadderSort reaches 3.73~GiB at \(N=10^8\). Hybrid LadderSort avoids this high-\(K\) memory blow-up by falling back, reducing the descending case to 1.12~GiB. On social-feed input, where \(K=24\), Hybrid does not fall back and therefore has the same memory footprint as Raw LadderSort. This supports the interpretation of Hybrid LadderSort as a practical guardrail rather than a replacement for the raw \(K\)-adaptive algorithm.
+Raw LadderSort stores ladders and merge state, which is costly when \(K=N\): descending input reaches 3.73~GiB. Hybrid falls back and reduces that case to 1.12~GiB. On social-feed input, \(K=24\), so Hybrid keeps the raw path and has the same footprint.
 
-Table~\ref{tab:phase5-comparisons} reports median key comparisons per input element at \(N=10^6\). The table uses five seeds per workload. For LadderSort, the comparison count includes placement-search comparisons and merge comparisons; for TimSort and the C++ baselines, the count comes from a comparator wrapper.
+Table~\ref{tab:phase5-comparisons} reports median key comparisons per element at \(N=10^6\) over five seeds.
 
 \begin{table}[H]
 \centering
-\small
-\caption{Median key comparisons per input element at \(N=10^6\). Lower values indicate fewer key comparisons per element, and the small-\(K\) interleaved workloads require far fewer comparisons for LadderSort than general-purpose baselines.}
+\scriptsize
+\caption{Median key comparisons per element at \(N=10^6\). Small-\(K\) interleavings require far fewer comparisons for LadderSort than general-purpose baselines.}
 \label{tab:phase5-comparisons}
-\begin{tabularx}{\linewidth}{@{}l r rrrrX@{}}
+\begin{tabular}{@{}lrrrrrr@{}}
 \toprule
-Dataset & \(K\) & Raw LadderSort & Hybrid LadderSort & TimSort & \texttt{std::sort} & \texttt{std::stable\_sort} \\
+Dataset & \(K\) & Raw & Hybrid & TimSort & \texttt{sort} & \texttt{stable} \\
 \midrule
 Two-run riffle & 2 & 2.00 & 2.00 & 4.93 & 20.89 & 18.96 \\
 Block-cyclic & 8 & 4.03 & 4.03 & 6.07 & 23.64 & 25.59 \\
@@ -1036,68 +616,47 @@ Social-feed & 24 & 3.83 & 3.83 & 6.16 & 17.01 & 18.95 \\
 Random & 1985 & 21.24 & 27.19 & 18.63 & 22.26 & 29.90 \\
 Descending & \(10^6\) & 22.95 & 3.00 & 1.00 & 3.00 & 37.02 \\
 \bottomrule
-\end{tabularx}
+\end{tabular}
 \end{table}
 
-The comparison counts support the structural interpretation of LadderSort. On two-run riffle, block-cyclic, and social-feed inputs, the measured \(K\) is small and LadderSort performs only about 2--4 comparisons per element. These values are lower than TimSort and much lower than \texttt{std::sort} and \texttt{std::stable\_sort} on the same interleaved workloads. On random input, where the measured \(K\) is much larger, raw LadderSort performs a comparison count comparable to general-purpose sorting. On descending input, raw LadderSort exhibits its high-\(K\) worst case, while Hybrid LadderSort falls back and reduces the comparison count substantially. TimSort remains best on descending input because it detects a single descending run and reverses it.
-
-Together, the memory and comparison experiments clarify the cost of the \(K\)-adaptive design. LadderSort reduces comparisons sharply when the input is a small interleaving of ordered streams, but the ladder representation can require additional memory. Hybrid LadderSort mitigates the high-\(K\) cases by falling back on random and descending inputs while preserving the raw path on small-\(K\) workloads.
+The comparison counts match the structural view. Small-\(K\) interleavings need only about 2--4 comparisons per element for LadderSort. Random input is comparable to general-purpose sorting, and descending input exposes the raw high-\(K\) case; Hybrid reduces that cost by falling back.
 
 \subsection{Real-World GitHub Event Trace}
 \label{real-world-github-event-trace}
 
-The synthetic suite lets us control \(K\), but it does not by itself show that interleaved ordered streams occur in real data. Table~\ref{tab:phase6-real-trace} reports results on the GH Archive trace described in Section~\ref{real-trace-protocol}. The processed trace contains 55,364 records from 12,783 repository sources. Raw LadderSort measures \(K=368\), giving \(K/N\approx 0.00665\), which confirms that the trace is not random-like under the ladder decomposition.
+The synthetic suite controls \(K\), but a public trace gives a credibility check. The GH Archive trace contains 55,364 records from 12,783 repository sources. Raw LadderSort measures \(K=368\), giving \(K/N\approx 0.00665\).
 
 \begin{table}[H]
 \centering
-\small
-\caption{Real-world GH Archive event-trace benchmark. The trace contains 55,364 records from 12,783 repository sources; times are median seconds over 10 rounds, speedup is relative to TimSort, and the measured \(K=368\) indicates low-\(K\) structure in a public event trace.}
+\scriptsize
+\caption{Real-world GH Archive event-trace benchmark. The trace contains 55,364 records from 12,783 repository sources; times are median seconds over 10 rounds, and speedup is relative to TimSort.}
 \label{tab:phase6-real-trace}
-\begin{tabularx}{\linewidth}{@{}lrrrrX@{}}
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
-Algorithm & Median time (s) & Measured \(K\) & Fallback rate & Speedup vs TimSort & Interpretation \\
+Algorithm & Median time (s) & Measured \(K\) & Fallback & Speedup \\
 \midrule
-Raw LadderSort & 0.002026 & 368 & 0.00 & 1.45 & Exposes small-\(K\) structure \\
-Hybrid LadderSort & 0.001600 & 237 & 1.00 & 1.84 & Conservative fallback path \\
-TimSort & 0.002939 & 368 & 0.00 & 1.00 & Run-adaptive baseline \\
-\texttt{std::sort} & 0.001001 & 368 & 0.00 & 2.94 & Fast standard baseline \\
-\texttt{std::stable\_sort} & 0.000688 & 368 & 0.00 & 4.27 & Fast stable baseline at this scale \\
+Raw LadderSort & 0.002026 & 368 & 0.00 & 1.45 \\
+Hybrid LadderSort & 0.001600 & 237 & 1.00 & 1.84 \\
+TimSort & 0.002939 & 368 & 0.00 & 1.00 \\
+\texttt{std::sort} & 0.001001 & 368 & 0.00 & 2.94 \\
+\texttt{std::stable\_sort} & 0.000688 & 368 & 0.00 & 4.27 \\
 \bottomrule
-\end{tabularx}
+\end{tabular}
 \end{table}
 
-The real trace supports the structural claim behind LadderSort. Although the dataset contains more than twelve thousand repository sources, the measured ladder count is only 368, indicating that the global sequence behaves like an interleaving of a much smaller number of locally ordered subsequences. Raw LadderSort is \(1.45\times\) faster than TimSort on this trace, showing that the \(K\)-adaptive path is competitive on a public event stream.
-
-The result should not be read as a universal runtime win. At this input scale, \texttt{std::sort} and \texttt{std::stable\_sort} are faster than LadderSort. Hybrid LadderSort also falls back on the trace, indicating that the current threshold is conservative. The main contribution of this experiment is therefore credibility: a public multi-source event stream exhibits the low-\(K\) structure targeted by LadderSort, and Raw LadderSort performs competitively against a run-adaptive baseline.
+The table separates structure from raw speed. Raw LadderSort measures \(K=368\), so the trace is far from random-like under the ladder decomposition. Raw LadderSort is faster than TimSort, and Hybrid is faster still because it takes the conservative fallback path. At this small input size, however, \texttt{std::sort} and \texttt{std::stable\_sort} remain faster. The real-trace result is therefore evidence of low-\(K\) structure and TimSort-level competitiveness, not a universal speed claim.
 
 \subsection{\texorpdfstring{\textbf{Asymptotic Behavior and Structural Interpretation}}{Asymptotic Behavior and Structural Interpretation}}\label{asymptotic-behavior-and-structural-interpretation}
 
-The empirical results above are consistent with the theoretical analysis
-of LadderSort in terms of \(N\) (input length) and \(K\) (number of
-nondecreasing subsequences produced in Phase~1).
-
-Phase~1 places each key into the leftmost ladder whose tail is less than
-or equal to the key. Tails are kept in a non-increasing \texttt{tops} array. Each
-placement performs a hinted lookup that uses a local probe, an
-exponential gallop to bound the search region, and a binary search
-within that region. The amortized cost per element is \(O(\log K)\), so Phase~1
-is \(O(N\log K)\).
-
-Phase~2 merges the \(K\) ladders. If \(K=1\), the single ladder is returned in
-\(O(N)\). If \(K=2\), a two-way galloping merge costs \(O(N)\). For \(K>2\), a
-loser-tree merge over \(K\) runs costs \(O(K)\) to build the tree and \(O(\log K)\)
-per extract-and-advance step, for a total of \(O(N\log K)\). Combining both
-phases yields
+LadderSort's cost follows from the measured ladder count \(K\). Phase~1 performs a hinted search over \texttt{tops}; Phase~2 returns one ladder, performs a two-way merge, or uses a loser tree. Combining the two phases gives
 \[
 T(N,K)=O(N\log K + K),
 \]
-which is \(\Theta(N)\) when \(K=1\) and \(\Theta(N\log K)\) when \(K\ge 2\). The additive
-\(K\) term is dominated by \(N\log K\) whenever \(N\ge K\). Table~9 summarizes the
-parametric bounds.
+which is linear for \(K=1\) and \(\Theta(N\log K)\) for larger \(K\). Table~\ref{tab:parametric-bounds} summarizes the bounds.
 
-{\small
+{\scriptsize
 \begin{longtable}{@{}p{0.14\linewidth}p{0.22\linewidth}p{0.18\linewidth}p{0.42\linewidth}@{}}
-\caption{Parametric bounds for LadderSort in terms of input size \(N\) and measured ladder count \(K\). Bounds are asymptotic time or space units, showing that the algorithm is linear for \(K=1\), \(O(N\log K)\) for larger \(K\), and sub-\(N\log N\) whenever \(K\) grows slowly.}
+\caption{Parametric bounds in terms of input size \(N\) and measured ladder count \(K\).}
 \label{tab:parametric-bounds}\\
 \toprule
 Notation & Time bound & Valid when & Interpretation \\
@@ -1125,175 +684,26 @@ Space & \(O(N+K)\) &  & Linear buffer for runs/output + \(O(K)\) metadata. \\
 \end{longtable}
 }
 
-These bounds explain the trends observed in the workloads:
-\begin{itemize}
-\item Best case: already sorted or all keys equal. Here \(K=1\) and \(T(N,1)=\Theta(N)\); this matches the linear behavior seen on sorted ascending inputs.
-\item Small-\(K\) inputs: constant or polylogarithmic \(K\) (for example, block-cyclic, two-run riffle, social-feed fan-in, and partial index merges). In these cases, \(T(N,K)\) is \(\Theta(N)\) or \(\Theta(N\log\log N)\), which is strictly below \(N\log N\); the measurements confirm that LadderSort is faster than partition-based baselines and competitive with or better than merge-based baselines.
-\item Random permutations: for distinct keys, classical patience-sorting theory implies that the offline optimum number of nondecreasing subsequences is \(\Theta(\sqrt{N})\) in expectation. The measured \(K\) produced by LadderSort's deterministic placement rule is likewise sublinear in our random workloads, yielding a lower measured merge height than full \(N\log N\) sorting, consistent with LadderSort being competitive but not leading on uniform random inputs.
-\item Adversarial descending: every element starts a new ladder, \(K=N\), and \(T(N,N)=\Theta(N\log N)\). This matches the worst-case behavior measured on sorted descending inputs.
-\end{itemize}
+Representative workloads fit this parameterization directly. Ascending input has \(K=1\). Block-cyclic, two-run riffle, social-feed, and partial-index merges have small fixed \(K\). Random inputs have sublinear measured \(K\), but optimized \texttt{std::sort} remains strong. Descending input gives \(K=N\), exposing the raw worst case and motivating the hybrid fallback.
 
-Table~\ref{tab:representative-input-complexity} connects representative input
-families from the experiments to typical \(K\) and resulting complexity.
+\section{\texorpdfstring{\textbf{Limitations and Threats to Validity}}{Limitations and Threats to Validity}}\label{limitations-and-threats-to-validity}
 
-{\small
-\begin{longtable}{@{}p{0.30\linewidth}p{0.12\linewidth}p{0.18\linewidth}p{0.36\linewidth}@{}}
-\caption{Representative input families, typical measured ladder count \(K\), and resulting asymptotic time complexity. The table summarizes why LadderSort is linear or near-linear on small-\(K\) interleavings and reaches \(N\log N\) only when \(K\) is large.}
-\label{tab:representative-input-complexity}\\
-\toprule
-Input family (from Results) & Typical \(K\) & Time & Notes \\
-\midrule
-\endfirsthead
+LadderSort depends on the measured ladder count \(K\). When \(K\approx N\), as in descending input, raw LadderSort reaches its \(O(N\log N)\) worst case with larger constants than tuned in-place baselines. It is also not in-place: storing ladders and merge state costs \(O(N+K)\) auxiliary space, and high-\(K\) construction can scatter writes across many ladders.
 
-\toprule
-Input family (from Results) & Typical \(K\) & Time & Notes \\
-\midrule
-\endhead
+The synthetic workloads are designed to model common patterns, not to cover all data. Different fan-in, burst, duplicate, or key-size choices could shift constants. The real-trace experiment adds one public GH Archive trace, but it should not be read as evidence that all real event streams have low measured \(K\).
 
-\bottomrule
-\endfoot
+Implementation choices also matter. The TimSort baseline is one header-only implementation, while \texttt{std::sort} and \texttt{std::stable\_sort} depend on the standard library, allocator, and platform. Our experiments use one ARM-based laptop, fixed seeds, and a documented compiler command; cross-platform results may differ.
 
-\bottomrule
-\endlastfoot
+Hybrid LadderSort reduces high-\(K\) exposure but introduces a threshold that may need tuning. Future work should evaluate more traces and key types, add a stable variant, reduce memory traffic, and study threshold policies across platforms.
 
-Sorted ascending & 1 & \(\Theta(N)\) & Phase~1 makes one run; Phase~2 returns it. \\
-Two-run riffle & \(\approx 2\) & \(\Theta(N)\) & Collapses via one 2-way galloping merge. \\
-Block-cyclic (\(K=8, B=4\)) & 8 & \(\Theta(N\log 8)\) & Few long runs; hinted placement is cheap. \\
-Band-limited jitter (\(W=32\)) & \(\le 33\) & \(\Theta(N\log 33)\) & Local disorder; small effective \(K\). \\
-Social-feed fan-in (10--40 src) & 10--40 & \(\Theta(N\log K)\) & Tie-heavy; deterministic tie-breaking ensures reproducible output. \\
-Search-index partial merges (\(K=16\)) & 16 & \(\Theta(N\log 16)\) & Overlap and bursts across runs. \\
-Uniform random (distinct keys) & \(\Theta(\sqrt{N})\) & \(\Theta(N\log \sqrt{N})\) & Classic behavior. \\
-Strictly descending & \(N\) & \(\Theta(N\log N)\) & Worst case (run explosion). \\
-All keys equal & 1 & \(\Theta(N)\) & Ties collapse into one run. \\
-\end{longtable}
-}
+\section{\texorpdfstring{\textbf{Conclusions and Future Work}}{Conclusions and Future Work}}\label{conclusions-and-future-work}
 
-Overall, the results demonstrate that LadderSort's running time scales
-primarily with the effective structure parameter \(K\) rather than with \(N\)
-alone. The algorithm attains linear time on fully sorted and tie-heavy
-small-\(K\) workloads, remains strictly sub-\(N\log N\) whenever \(K\) is small,
-behaves close to half-height \(N\log N\) on random permutations, and
-degrades gracefully to \(N\log N\) on adversarial descending inputs.
+We introduced LadderSort, a deterministic adaptive sorting algorithm for inputs that are interleavings of nondecreasing subsequences. LadderSort differs from natural run-adaptive methods such as TimSort by adapting to the number of interleaved nondecreasing subsequences \(K\), rather than the number of contiguous runs. The raw algorithm is the main contribution: it builds ladders online and merges them in \(O(N\log K)\) time using \(O(N+K)\) auxiliary space.
 
-\section{\texorpdfstring{\textbf{Limitations and Threats to
-Validity}}{Limitations and Threats to Validity}}\label{limitations-and-threats-to-validity}
+The experiments support the intended use case. LadderSort is strongest on small-\(K\) interleavings, remains competitive but not dominant on random input, and exposes its raw worst case on descending input. The ablation, memory, comparison-count, and GH Archive experiments clarify the engineering costs and the structural regime where the method is useful. Hybrid LadderSort is best viewed as a practical guardrail for high-\(K\) inputs, not a replacement for the raw \(K\)-adaptive algorithm.
 
-\subsection{\texorpdfstring{\textbf{Algorithmic
-Limitations}}{Algorithmic Limitations}}\label{algorithmic-limitations}
+Future work should broaden the real-trace evaluation, develop stable and lower-memory variants, and tune fallback thresholds. Parallel and external-memory variants are also natural directions because the ladder representation already separates the input into sorted streams.
 
-The performance of LadderSort depends critically on the number of
-subsequences K discovered in Phase 1. For adversarial inputs where K is
-approximately N (for example, strictly descending sequences with few
-ties), the algorithm degrades to Theta(N log N) with a larger constant
-factor than highly tuned in-place sorts, because it must materialize
-many ladders and then perform a K-way merge. LadderSort is not in-place:
-it uses O(N + K) auxiliary space, which can be problematic when memory
-is constrained. In addition, run construction may touch many ladders in
-quick succession; when K is large this increases write scattering and
-may harm cache locality compared with contiguous two-way merges.
-Finally, the analysis and implementation assume a total order and deterministic tie-breaking for equal keys. Domains with non-total comparators (for example, floating-point NaNs) or very expensive comparisons/key extraction may change the practical trade-offs.
-
-\subsection{\texorpdfstring{\textbf{Workload
-Representativeness}}{Workload Representativeness}}\label{workload-representativeness}
-
-The synthetic generators are designed to capture common systems patterns
-(nearly sorted data with local jitter, block-cyclic fan-in, two-run
-riffles, social-feed fan-in, and partial index merges), but they cannot
-cover the full diversity of real workloads. Specific parameter choices
-(for example, W = 32, K in \{8, 16, 24\}, burst sizes) may favor some
-algorithms; different settings could shift the relative ranking. The
-benchmarks use only 32-bit integer keys; behavior with strings,
-composite keys, or custom comparators may differ due to larger key
-sizes, pointer indirection, and different cache behavior. Although a
-uniform-random baseline is included, the study does not explore all
-pathological patterns (for example, alternating high/low sequences
-engineered to maximize K, or inputs tuned specifically to stress
-galloping thresholds).
-
-\subsection{\texorpdfstring{\textbf{Implementation
-Comparability}}{Implementation Comparability}}\label{implementation-comparability}
-
-The quicksort and mergesort baselines are competent, single-file
-reference implementations; highly engineered library versions may behave
-differently. The TimSort baseline is taken from a specific header-only
-implementation, and other TimSort variants (with different run bounds,
-stack policies, or gallop thresholds) may perform better or worse. The
-behavior of std::sort and std::stable\_sort depends on the standard
-library and allocator; the reported results reflect libstdc++ on an
-arm64 platform. LadderSort and the reference mergesort reuse scratch
-buffers across runs; despite a warm-up iteration for each algorithm,
-differences in allocation strategy or buffer-reuse policies can still
-influence performance.
-
-\subsection{\texorpdfstring{\textbf{Construct Validity of
-Measurements}}{Construct Validity of Measurements}}\label{construct-validity-of-measurements}
-
-The evaluation reports only wall-clock time. We do not measure memory
-usage, peak footprint, bandwidth, or microarchitectural counters (for
-example, cache, TLB, or branch behavior). Some algorithms move less data
-(in-place methods) or exhibit better locality on particular inputs; such
-advantages are not fully captured by timing alone. Energy consumption is
-also not measured, even though it is increasingly relevant for mobile,
-embedded, and edge platforms.
-
-\subsection{\texorpdfstring{\textbf{Reproducibility and External
-Validity}}{Reproducibility and External Validity}}\label{reproducibility-and-external-validity}
-
-The experiments use fixed random seeds, a documented compile command,
-and a post-run correctness check, which supports reproducibility on the
-same platform and toolchain. Nevertheless, small code or toolchain
-changes (for example, inlining decisions or link-time optimization
-partitioning) can alter constant factors. Cross-platform reproducibility
-will require rebuilding with native compilers and libraries, and results
-may still vary due to different ABIs, standard libraries, and allocator
-behavior.
-
-\subsection{\texorpdfstring{\textbf{Mitigations and Future
-Directions}}{Mitigations and Future Directions}}\label{mitigations-and-future-directions}
-
-Several of these threats can be mitigated in future work. Extending the
-evaluation to additional data types, key distributions, and adversarial
-patterns would strengthen claims about generality. Porting the
-implementation to multiple platforms and standard-library stacks, and
-reporting memory and microarchitectural metrics alongside time, would
-provide a more complete performance profile. On the algorithmic side,
-exploring in-place or more memory-efficient variants of LadderSort, as
-well as mechanisms to detect when K becomes large and switch to
-alternative strategies, could reduce the impact of its worst-case
-regimes.
-
-\section{\texorpdfstring{\textbf{Conclusions and Future
-Work}}{Conclusions and Future Work}}\label{conclusions-and-future-work}
-
-We introduced LadderSort, a deterministic adaptive sorting algorithm whose running time depends on the number \(K\) of interleaved nondecreasing subsequences present in the input. The analysis characterizes performance in terms of N, the input length, and K, the number of subsequences produced in Phase 1: T(N, K) is Theta(N) when K = 1 and Theta(N log K) otherwise, with linear space plus an additional O(K) metadata footprint. This parameterization matches what we observe in practice: the running time tracks the amount of order already present in the data rather than assuming fully random inputs.
-
-Across a suite of workloads that mirror real systems band-limited
-``nearly sorted'' data, block-cyclic fan-in, two-run riffles,
-social-feed assembly, and partial index merges LadderSort consistently
-benefits from small K. It remains competitive on uniform random inputs
-and clearly leads when existing order is concentrated in a few
-interleaved streams, while degrading gracefully to N log N on
-adversarial descending inputs. The algorithm behaves deterministically under duplicates, emitting equal keys in a fixed ladder-identifier order in tie-heavy scenarios that arise in feed construction and index maintenance. Where other methods excel on specific shapes (for example, TimSort on fully sorted or reversed arrays via run detection and reversal), LadderSort remains close in those linear regimes and surpasses partition-based baselines on small-K interleaves.
-
-Methodologically, LadderSort achieves these results using simple
-building blocks: a hinted search over a nonincreasing array of run tails
-for element placement, a two-way galloping merge when K = 2, and a
-loser-tree merge when K \textgreater{} 2. The design avoids heavy data
-structures, is straightforward to implement, and scales to very large
-inputs without tuning beyond standard compiler optimizations.
-
-There are several natural directions for future work. On the theory
-side, tighter distributional analyses of K under realistic data models
-(including duplicates and correlations) would sharpen the expected-time
-guarantees. On the systems side, cache-aware and reduced-copy variants,
-as well as parallel and external-memory versions, could broaden the
-algorithm's applicability in large-scale and resource-constrained
-environments. Finally, adaptive switching strategies detecting when K
-becomes large or when a single long run dominates and then falling back
-to existing library sorts could provide near best-of-both-worlds
-behavior automatically. In this way, LadderSort can serve as a bridge
-between worst-case-oriented designs and the partial order that dominates
-many real-world data streams, offering a simple, deterministic alternative that is fast precisely where many practical workloads lie.
 \section{References}\label{references}
 
 {[}1{]} Knuth, D.E. \emph{The Art of Computer Programming; Volume 3: Sorting and Searching}; 2nd ed.; Addison-Wesley: Reading, MA, USA, 1998.

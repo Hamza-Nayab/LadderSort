@@ -30,6 +30,17 @@ COLORS = [
     (255, 127, 0),
 ]
 
+# ---------- B&W-safe hatch patterns (SVG pattern ids) ----------
+# Each series gets a distinct geometric fill so bars are distinguishable in grayscale.
+# Patterns: diagonal lines, dots, crosshatch, vertical lines, horizontal lines.
+HATCH_PATTERNS = [
+    "hatch_diag",
+    "hatch_dots",
+    "hatch_cross",
+    "hatch_vert",
+    "hatch_horiz",
+]
+
 
 @dataclass
 class Bar:
@@ -38,6 +49,7 @@ class Bar:
     width: float
     height: float
     color: tuple[int, int, int]
+    series_index: int = 0
     label: str | None = None
 
 
@@ -142,7 +154,7 @@ def build_grouped_bars(
             h = (value / y_max) * chart_h
             x = group_left + si * (bar_w + bar_gap)
             y = plot_y1 - h
-            bars.append(Bar(x, y, bar_w, h, COLORS[si % len(COLORS)]))
+            bars.append(Bar(x, y, bar_w, h, COLORS[si % len(COLORS)], si))
         label = str(group)
         texts.append(Text(center, HEIGHT - 74, label, 11))
 
@@ -150,16 +162,46 @@ def build_grouped_bars(
     legend_y = HEIGHT - 35
     for si, series in enumerate(series_order):
         x = legend_x + si * 160
-        bars.append(Bar(x, legend_y - 12, 14, 14, COLORS[si % len(COLORS)]))
+        bars.append(Bar(x, legend_y - 12, 14, 14, COLORS[si % len(COLORS)], si))
         texts.append(Text(x + 20, legend_y, str(series), 11, anchor="start"))
 
     return bars, texts, lines
+
+
+def _svg_hatch_defs() -> str:
+    """Return SVG <defs> block with geometric hatch patterns for B&W printing."""
+    return (
+        '<defs>'
+        # diagonal lines (45°)
+        '<pattern id="hatch_diag" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">'
+        '<line x1="0" y1="0" x2="0" y2="6" stroke="#000" stroke-width="1.2" stroke-opacity="0.45"/>'
+        '</pattern>'
+        # dots
+        '<pattern id="hatch_dots" width="6" height="6" patternUnits="userSpaceOnUse">'
+        '<circle cx="3" cy="3" r="1.2" fill="#000" fill-opacity="0.45"/>'
+        '</pattern>'
+        # crosshatch
+        '<pattern id="hatch_cross" width="6" height="6" patternUnits="userSpaceOnUse">'
+        '<line x1="0" y1="0" x2="6" y2="6" stroke="#000" stroke-width="0.9" stroke-opacity="0.40"/>'
+        '<line x1="6" y1="0" x2="0" y2="6" stroke="#000" stroke-width="0.9" stroke-opacity="0.40"/>'
+        '</pattern>'
+        # vertical lines
+        '<pattern id="hatch_vert" width="5" height="5" patternUnits="userSpaceOnUse">'
+        '<line x1="2.5" y1="0" x2="2.5" y2="5" stroke="#000" stroke-width="1.0" stroke-opacity="0.45"/>'
+        '</pattern>'
+        # horizontal lines
+        '<pattern id="hatch_horiz" width="5" height="5" patternUnits="userSpaceOnUse">'
+        '<line x1="0" y1="2.5" x2="5" y2="2.5" stroke="#000" stroke-width="1.0" stroke-opacity="0.45"/>'
+        '</pattern>'
+        '</defs>'
+    )
 
 
 def write_svg(path: Path, bars: list[Bar], texts: list[Text], lines: list[Line]) -> None:
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">',
         '<rect width="100%" height="100%" fill="white"/>',
+        _svg_hatch_defs(),
     ]
     for line in lines:
         dash = ' stroke-dasharray="5 4"' if line.dash else ""
@@ -168,9 +210,16 @@ def write_svg(path: Path, bars: list[Bar], texts: list[Text], lines: list[Line])
             f'stroke="{rgb(line.stroke)}" stroke-width="{line.width}"{dash}/>'
         )
     for bar in bars:
+        # color fill
         parts.append(
             f'<rect x="{bar.x:.2f}" y="{bar.y:.2f}" width="{bar.width:.2f}" height="{bar.height:.2f}" '
             f'fill="{rgb(bar.color)}"/>'
+        )
+        # hatch pattern overlay for B&W readability
+        hatch_id = HATCH_PATTERNS[bar.series_index % len(HATCH_PATTERNS)]
+        parts.append(
+            f'<rect x="{bar.x:.2f}" y="{bar.y:.2f}" width="{bar.width:.2f}" height="{bar.height:.2f}" '
+            f'fill="url(#{hatch_id})"/>'
         )
     for text in texts:
         weight = "700" if text.bold else "400"

@@ -15,6 +15,15 @@ df = pd.read_csv(summary_path)
 n = df["n"].max()
 df = df[df["n"] == n]
 
+# ---------- B&W-safe marker assignments ----------
+MARKER_MAP = {
+    "LadderSort":       "s",   # square
+    "HybridLadderSort": "D",   # diamond
+    "TimSort":          "^",   # triangle up
+    "StdSort":          "o",   # circle
+    "StableSort":       "x",   # cross
+}
+
 plt.figure()
 
 for algo in ["LadderSort", "HybridLadderSort", "TimSort", "StdSort", "StableSort"]:
@@ -25,7 +34,9 @@ for algo in ["LadderSort", "HybridLadderSort", "TimSort", "StdSort", "StableSort
     plt.plot(
         sub["measured_k_mean"],
         sub["median_sec"],
-        marker="o",
+        marker=MARKER_MAP.get(algo, "o"),
+        markersize=6,
+        markevery=1,
         label=algo,
     )
 
@@ -49,7 +60,9 @@ for algo in ["LadderSort", "HybridLadderSort", "StdSort", "StableSort"]:
     plt.plot(
         sub["measured_k_mean"],
         sub["speedup_vs_timsort_median"],
-        marker="o",
+        marker=MARKER_MAP.get(algo, "o"),
+        markersize=6,
+        markevery=1,
         label=algo,
     )
 
